@@ -12,7 +12,7 @@ st.subheader("Asociaciones Civiles - Motor de Importación Directa para 'ONVIO'"
 # 1. CUENTAS CONTABLES FIJAS (Extraídas de tu Plan de Cuentas)
 CUENTA_BANCO_COMAFI = "11016010"  # CTA/CTE $ COMAFI 1070-01085-6
 
-# 2. DICCIONARIO INTELIGENTE DE EQUIVALENCIAS
+# 2. DICCIONARIO INTELIGENTE DE EQUIVALENCIAS ACTUALIZADO CON CODIGOS REALES
 EQUIVALENCIAS_BASE = {
     "DEB LEY 25413": ("53070000", "IMPUESTO DEB LEY 25413"),
     "CRED LEY 25413": ("53080000", "IMPUESTO CRED LEY 25413"),
@@ -22,7 +22,12 @@ EQUIVALENCIAS_BASE = {
     "COMISION": ("53010000", "GASTOS BANCARIOS"),
     "IVA - ALICUOTA": ("11032050", "DGI IVA RET. Y PERCEPCIONES"),
     "SUELDOS": ("21013010", "SUELDOS Y JORNALES A PAGAR"),
-    "PROV": ("21012010", "PROVEEDORES"),
+    
+    # TRANSFERENCIAS CALIBRADAS CON TU PLAN DE CUENTAS REAL
+    "TRANSFERENCIA TERCEROS EBANKIN": ("21012010", "PROVEEDORES"),
+    "TRANSF. INMEDIATA RECIBIDA": ("11031010", "DEUDORES POR SERVICIOS"),
+    "TRANSFERENCIA TERCEROS RECIBID": ("11031010", "DEUDORES POR SERVICIOS"),
+    
     "HONORARIOS": ("52020000", "HONORARIOS PROFESIONALES"),
     "DONACION": ("43020000", "DONACIONES"),
     "SUBSIDIO": ("42070000", "SUBSIDIOS")
@@ -68,13 +73,13 @@ def parsear_renglon_comafi(linea):
     if len(valores_numericos) < 2:
         return None 
         
-    importe_final = valores_numericos[-2]  # Toma el anteúltimo valor (el importe real) y descarta el último (Saldo)
+    importe_final = valores_numericos[-2]  # Descarta el saldo acumulado de la última columna
     idx_corte_desc = indices_numericos[0]
     descripcion = " ".join(partes[1:idx_corte_desc])
     
     es_credito = False
     desc_upper = descripcion.upper()
-    if any(keyword in desc_upper for keyword in ["RECIBIDA", "CREDITOS", "DEPOSITO", "ACREDITADO"]):
+    if any(keyword in desc_upper for keyword in ["RECIBIDA", "CREDITOS", "DEPOSITO", "ACREDITADO", "RECIBID"]):
         es_credito = True
         
     return {
@@ -133,9 +138,11 @@ if archivo_cargado is not None:
                         break
                 
                 if es_credito:
+                    # Ingreso: (+) al Banco Comafi, (-) a Deudores por Servicios
                     monto_imputacion = -importe
                     monto_banco = importe
                 else:
+                    # Egreso: (+) a Proveedores/Gastos, (-) al Banco Comafi
                     monto_imputacion = importe
                     monto_banco = -importe
                 
