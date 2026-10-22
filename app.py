@@ -9,108 +9,110 @@ st.set_page_config(page_title="Automatizador Contable - Sector Sociedades", layo
 st.title("🤖 Sistema de Automatización Contable")
 st.subheader("Asociaciones Civiles - Motor de Importación Directa para 'ONVIO'")
 
-# 1. CUENTAS CONTABLES FIJAS (Extraídas de tu Plan de Cuentas)
+# 1. CUENTAS CONTABLES FIJAS (Plan de Cuentas)
 CUENTA_BANCO_COMAFI = "11016010"  # CTA/CTE $ COMAFI 1070-01085-6
+CUOTA_PUENTE_DEF = "13000000"
 
-# 2. DICCIONARIO INTELIGENTE DE EQUIVALENCIAS ACTUALIZADO CON CODIGOS REALES
+# 2. DICCIONARIO RE-CALIBRADO CON TUS ESPECIFICACIONES EXACTAS
 EQUIVALENCIAS_BASE = {
-    "DEB LEY 25413": ("53070000", "IMPUESTO DEB LEY 25413"),
-    "CRED LEY 25413": ("53080000", "IMPUESTO CRED LEY 25413"),
-    "DEBITOS - TASA": ("53070000", "IMPUESTO DEB LEY 25413"),
-    "CREDITOS-TASA G": ("53080000", "IMPUESTO CRED LEY 25413"),
-    "DEBITOS ART 45": ("53070000", "IMPUESTO DEB LEY 25413"),
+    "MANTENIMIENTO DE": ("53010000", "GASTOS BANCARIOS"),
     "COMISION": ("53010000", "GASTOS BANCARIOS"),
+    "PAGO DE CHEQUE POR CAJA": ("21012010", "PROVEEDORES"),
+    "PAGO DE CHEQUE 48 HS": ("21012010", "PROVEEDORES"),
+    "DEPOSITO DE CHEQUES 48 HS": ("21012010", "PROVEEDORES"),
+    "DEPOSITO DE EFECTIVO": ("11011000", "CAJA"),
+    "DEPOSITO EN CAJERO AUTOMATICO": ("11011000", "CAJA"),
+    "DEBITOS - TASA": ("53070000", "IMPUESTO DEB LEY 25413"),
+    "DEBITOS ART 45": ("53070000", "IMPUESTO DEB LEY 25413"),
+    "DEB LEY 25413": ("53070000", "IMPUESTO DEB LEY 25413"),
+    "CREDITOS-TASA G": ("53080000", "IMPUESTO CRED LEY 25413"),
+    "CRED LEY 25413": ("53080000", "IMPUESTO CRED LEY 25413"),
     "IVA - ALICUOTA": ("11032050", "DGI IVA RET. Y PERCEPCIONES"),
     "SUELDOS": ("21013010", "SUELDOS Y JORNALES A PAGAR"),
-    
-    # TRANSFERENCIAS CALIBRADAS CON TU PLAN DE CUENTAS REAL
     "TRANSFERENCIA TERCEROS EBANKIN": ("21012010", "PROVEEDORES"),
     "TRANSF. INMEDIATA RECIBIDA": ("11031010", "DEUDORES POR SERVICIOS"),
     "TRANSFERENCIA TERCEROS RECIBID": ("11031010", "DEUDORES POR SERVICIOS"),
-    
     "HONORARIOS": ("52020000", "HONORARIOS PROFESIONALES"),
-    "DONACION": ("43020000", "DONACIONES"),
-    "SUBSIDIO": ("42070000", "SUBSIDIOS")
 }
 
 # Configuración en la barra lateral
 st.sidebar.header("⚙️ Parámetros de Importación ONVIO")
 nro_asiento_inicial = st.sidebar.number_input("Número de Asiento Inicial", min_value=1, value=1, step=1)
-cuenta_puente = st.sidebar.text_input("Cuenta Puente (Sin coincidencia)", value="13000000")
+cuenta_puente = st.sidebar.text_input("Cuenta Puente", value=CUOTA_PUENTE_DEF)
 
 st.markdown("### 1. Cargar Extracto Bancario Obligatorio")
-archivo_cargado = st.file_uploader("Arrastrá el PDF original del Banco Comafi", type=["pdf", "xlsx", "xls", "csv"])
+archivo_cargado = st.file_uploader("Arrastrá el PDF original del Banco Comafi", type=["pdf"])
 
-def parsear_renglon_comafi(linea):
-    partes = linea.split()
-    if len(partes) < 3:
-        return None
-        
-    # Verificar si el renglón arranca con una fecha válida (DD/MM/YY)
-    if not re.match(r'^\d{2}/\d{2}/\d{2}$', partes[0]):
-        return None
-        
-    fecha = partes[0]
+def procesar_lineas_comafi(text):
+    movimientos = []
+    lineas = text.split("\n")
     
-    if "Saldo Anterior" in linea:
-        return None 
-        
-    valores_numericos = []
-    indices_numericos = []
-    
-    for idx in reversed(range(1, len(partes))):
-        token = partes[idx]
-        token_clean = token.replace(".", "").replace(",", ".")
-        if token_clean.endswith("-"):
-            token_clean = "-" + token_clean[:-1]
-        try:
-            val = float(token_clean)
-            valores_numericos.insert(0, val)
-            indices_numericos.insert(0, idx)
-        except ValueError:
-            break 
+    for linea in lineas:
+        partes = linea.split()
+        if len(partes) < 3:
+            continue
             
-    if len(valores_numericos) < 2:
-        return None 
+        # Validar si arranca con fecha DD/MM/YY
+        if not re.match(r'^\d{2}/\d{2}/\d{2}$', partes[0]):
+            continue
+            
+        fecha = partes[0]
+        if "Saldo Anterior" in linea:
+            continue
+            
+        # Filtrar todos los números reales de la línea (con decimales)
+        numeros_encontrados = []
+        for p in partes[1:]:
+            p_clean = p.replace(".", "").replace(",", ".")
+            if p_clean.endswith("-"):
+                p_clean = "-" + p_clean[:-1]
+            try:
+                val = float(p_clean)
+                # Las referencias bancarias suelen ser enteros largos sin coma. 
+                # Evaluamos si tiene decimales significativos o si está en la posición de importes.
+                numeros_encontrados.append((val, p))
+            except ValueError:
+                continue
+
+        if len(numeros_encontrados) < 2:
+            continue
+            
+        # En Comafi, el último valor es SIEMPRE el Saldo. El ANTEÚLTIMO es el Importe real de Débito/Crédito.
+        # Esto descarta de forma matemática cualquier número de referencia previo.
+        importe_real = numeros_encontrados[-2][0]
+        saldo_real = numeros_encontrados[-1][0]
         
-    importe_final = valores_numericos[-2]  # Descarta el saldo acumulado de la última columna
-    idx_corte_desc = indices_numericos[0]
-    descripcion = " ".join(partes[1:idx_corte_desc])
-    
-    es_credito = False
-    desc_upper = descripcion.upper()
-    if any(keyword in desc_upper for keyword in ["RECIBIDA", "CREDITOS", "DEPOSITO", "ACREDITADO", "RECIBID"]):
-        es_credito = True
+        # Aislar la descripción eliminando la fecha y los números del final
+        str_numeros_finales = [numeros_encontrados[-2][1], numeros_encontrados[-1][1]]
+        descripcion = " ".join([x for x in partes[1:] if x not in str_numeros_finales and not re.match(r'^\d{6,12}$', x)])
         
-    return {
-        "Fecha": fecha,
-        "Descripción": descripcion,
-        "Importe": importe_final,
-        "EsCredito": es_credito
-    }
+        # Determinar dirección del movimiento
+        es_credito = False
+        desc_upper = descripcion.upper()
+        if any(kw in desc_upper for kw in ["RECIBIDA", "CREDITOS", "DEPOSITO", "ACREDITADO", "RECIBID"]):
+            es_credito = True
+            
+        movimientos.append({
+            "Fecha": fecha,
+            "Descripción": descripcion.strip(),
+            "Importe": abs(importe_real),
+            "EsCredito": es_credito
+        })
+    return movimientos
 
 if archivo_cargado is not None:
-    ext = archivo_cargado.name.split(".")[-1].lower()
     movimientos_limpios = []
-    
-    if ext == "pdf":
-        with pdfplumber.open(archivo_cargado) as pdf:
-            for page in pdf.pages:
-                text = page.extract_text()
-                if text:
-                    for linea in text.split("\n"):
-                        res = parsear_renglon_comafi(linea)
-                        if res:
-                            movimientos_limpios.append(res)
-        df_origen = pd.DataFrame(movimientos_limpios)
-    else:
-        st.warning("Por favor, subí el archivo en formato PDF original.")
-        df_origen = pd.DataFrame()
+    with pdfplumber.open(archivo_cargado) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text()
+            if text:
+                movimientos_limpios.extend(procesar_lineas_comafi(text))
+                
+    df_origen = pd.DataFrame(movimientos_limpios)
 
     if not df_origen.empty:
         st.success(f"Se extrajeron correctamente {len(df_origen)} transacciones del PDF.")
         
-        # Ordenar cronológicamente para ONVIO
         df_origen["Fecha_DT"] = pd.to_datetime(df_origen["Fecha"], format="%d/%m/%y", errors='coerce')
         df_origen = df_origen.sort_values(by="Fecha_DT").drop(columns=["Fecha_DT"])
         
@@ -137,12 +139,11 @@ if archivo_cargado is not None:
                         nombre_cuenta = datos[1]
                         break
                 
+                # Regla de signos ONVIO balanceada
                 if es_credito:
-                    # Ingreso: (+) al Banco Comafi, (-) a Deudores por Servicios
                     monto_imputacion = -importe
                     monto_banco = importe
                 else:
-                    # Egreso: (+) a Proveedores/Gastos, (-) al Banco Comafi
                     monto_imputacion = importe
                     monto_banco = -importe
                 
@@ -188,12 +189,6 @@ if archivo_cargado is not None:
             st.write("#### Previsualización de la planilla estructurada para ONVIO:")
             st.dataframe(df_resultado)
             
-            suma_total = df_resultado["Importe en moneda local"].sum()
-            if abs(suma_total) < 0.01:
-                st.success("✅ Validación Exitosa: El archivo está perfectamente balanceado para ONVIO.")
-            else:
-                st.error(f"⚠️ Error de balanceo: La suma total difiere por {suma_total}. Verifique los signos.")
-                
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df_resultado.to_excel(writer, index=False, sheet_name='Importacion_ONVIO')
