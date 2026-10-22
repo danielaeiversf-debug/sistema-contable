@@ -9,11 +9,11 @@ st.set_page_config(page_title="Automatizador Contable - Sector Sociedades", layo
 st.title("🤖 Sistema de Automatización Contable")
 st.subheader("Asociaciones Civiles - Motor de Importación Directa para 'ONVIO'")
 
-# 1. CUENTAS CONTABLES FIJAS (Plan de Cuentas Real)
+# 1. CUENTAS CONTABLES FIJAS
 CUENTA_BANCO_COMAFI = "11016010"  # CTA/CTE $ COMAFI 1070-01085-6
 CUENTA_PUENTE_DEF = "13000000"
 
-# 2. MAPEO DEFINITIVO DE EQUIVALENCIAS CONTABLES
+# 2. MAPEO DE EQUIVALENCIAS CONTABLES
 EQUIVALENCIAS_BASE = {
     "MANTENIMIENTO DE": ("53010000", "GASTOS BANCARIOS"),
     "COMISION EMISION": ("53010000", "GASTOS BANCARIOS"),
@@ -52,61 +52,76 @@ def procesar_lineas_comafi(text):
     movimientos = []
     lineas = text.split("\n")
     
+    fecha_en_memoria = None
+    concepto_acumulado = ""
+    
     for linea in lineas:
         partes = linea.split()
-        if len(partes) < 3:
+        if len(partes) == 0:
             continue
             
-        # Validar si arranca con fecha (DD/MM/YY)
-        if not re.match(r'^\d{2}/\d{2}/\d{2}$', partes[0]):
-            continue
-            
-        fecha = partes[0]
-        if "Saldo Anterior" in linea:
-            continue
-            
-        # Buscar números contables en la línea
-        importes_validos = []
-        tokens_descripcion = []
+        # Comprobar si la línea arranca con una fecha válida (DD/MM/YY)
+        tiene_fecha = re.match(r'^\d{2}/\d{2}/\d{2}$', partes[0])
         
-        for token in partes[1:]:
-            # Ignorar números de referencia puros (de 6 a 12 dígitos)
-            if re.match(r'^\d{6,12}$', token):
+        if tiene_fecha:
+            fecha_en_memoria = partes[0]
+            # Si es una línea de "Saldo Anterior" o "Transporte", la salteamos
+            if "Saldo Anterior" in linea or "Transporte" in linea:
                 continue
-                
+            concepto_acumulado = " ".join([x for x in partes[1:] if not re.match(r'^\d{6,12}$', x) and "," not in x])
+        else:
+            # Si no tiene fecha y no tenemos ninguna fecha en memoria previa, ignoramos la basura del encabezado
+            if not fecha_en_memoria:
+                continue
+            # Acumular texto descriptivo secundario (ej: nombres de clientes en renglón de abajo)
+            texto_secundario = " ".join([x for x in partes if not re.match(r'^\d{6,12}$', x) and "," not in x])
+            if texto_secundario:
+                concepto_acumulado += " " + texto_secundario
+
+        # Buscar importes contables con coma decimal en la línea actual
+        importes_validos = []
+        for token in partes:
+            if re.match(r'^\d{6,12}$', token): # Ignorar números de referencia largos
+                continue
             token_clean = token.replace(".", "").replace(",", ".")
             if token_clean.endswith("-"):
                 token_clean = "-" + token_clean[:-1]
-                
             try:
-                val = float(token_clean)
-                importes_validos.append(val)
+                if "," in token: # Solo procesar formatos con decimales explícitos
+                    val = float(token_clean)
+                    importes_validos.append(val)
             except ValueError:
-                tokens_descripcion.append(token)
+                continue
 
         if not importes_validos:
-            continue
+            continue  # Si esta línea no traía importes financieros, seguimos acumulando texto en la próxima vuelta
             
-        # Si la línea tiene Saldo al final, tomamos el anteúltimo. Si no, tomamos el único.
+        # En Comafi, el último valor es el Saldo si la línea lo incluye. 
+        # Si la línea tiene 2 o más importes (monto + saldo), tomamos el anteúltimo.
+        # Si tiene 1 solo importe (porque es un renglón descolgado de crédito sin saldo al lado), ese es el importe real.
         if len(importes_validos) >= 2:
             importe_real = importes_validos[-2]
         else:
             importe_real = importes_validos[-1]
             
-        descripcion = " ".join(tokens_descripcion)
+        desc_final = concepto_acumulado.strip()
         
-        # Determinar si es crédito o débito
+        # Determinar si es crédito de manera inteligente
         es_credito = False
-        desc_upper = descripcion.upper()
-        if any(kw in desc_upper for kw in ["RECIBIDA", "CREDITOS", "DEPOSITO", "ACREDITADO", "RECIBID"]):
+        desc_upper = desc_final.upper()
+        if any(kw in desc_upper for kw in ["RECIBIDA", "CREDITOS", "DEPOSITO", "ACREDITADO", "RECIBID", "TONELLI", "CPS"]):
             es_credito = True
             
         movimientos.append({
-            "Fecha": fecha,
-            "Descripción": descripcion.strip(),
+            "Fecha": fecha_en_memoria,
+            "Descripción": desc_final,
             "Importe": abs(importe_real),
             "EsCredito": es_credito
         })
+        
+        # Resetear concepto acumulado para la siguiente transacción
+        concepto_acumulado = ""
+        
     return movimientos
 
 if archivo_cargado is not None:
@@ -120,10 +135,7 @@ if archivo_cargado is not None:
     df_origen = pd.DataFrame(movimientos_limpios)
 
     if not df_origen.empty:
-        st.success(f"Se extrajeron correctamente {len(df_origen)} transacciones reales del PDF.")
-        
-        df_origen["Fecha_DT"] = pd.to_datetime(df_origen["Fecha"], format="%d/%m/%y", errors='coerce')
-        df_origen = df_origen.sort_values(by="Fecha_DT").drop(columns=["Fecha_DT"])
+        st.success(f"Se extrajeron correctamente {len(df_origen)} transacciones respetando el orden del extracto.")
         
         asientos_onvio = []
         asiento_actual = nro_asiento_inicial
@@ -144,7 +156,6 @@ if archivo_cargado is not None:
                 
                 for clave, datos in EQUIVALENCIAS_BASE.items():
                     if clave in desc_upper:
-                        # CORRECCIÓN AQUÍ: Separamos explícitamente el código numérico del texto
                         codigo_cuenta = datos[0]
                         nombre_cuenta = datos[1]
                         break
@@ -156,7 +167,7 @@ if archivo_cargado is not None:
                     monto_imputacion = importe
                     monto_banco = -importe
                 
-                # Pase 1: Cuenta Destino Imputada (Formateada Limpia)
+                # Pase 1: Cuenta Destino Imputada
                 asientos_onvio.append({
                     "Número de asiento": asiento_actual,
                     "Número de Pase": pase_actual,
