@@ -65,43 +65,37 @@ def procesar_lineas_comafi(text):
         if "Saldo Anterior" in linea:
             continue
             
-        # Separar tokens financieros (importes con decimales) de números de referencia (enteros largos)
+        # Buscar números contables en la línea
         importes_validos = []
         tokens_descripcion = []
         
         for token in partes[1:]:
-            # Si el token cumple con la estructura de un número largo de referencia contable (6 a 12 dígitos puros)
+            # Ignorar números de referencia puros (de 6 a 12 dígitos)
             if re.match(r'^\d{6,12}$', token):
-                continue  # Ignoramos la referencia para que no interfiera con los montos
+                continue
                 
             token_clean = token.replace(".", "").replace(",", ".")
             if token_clean.endswith("-"):
                 token_clean = "-" + token_clean[:-1]
                 
             try:
-                # Comprobamos si tiene formato de importe contable argentino (ej: 300,00 o 15.985,00 con la coma decimal)
-                if "," in token:
-                    val = float(token_clean)
-                    importes_validos.append(val)
-                else:
-                    tokens_descripcion.append(token)
+                val = float(token_clean)
+                importes_validos.append(val)
             except ValueError:
                 tokens_descripcion.append(token)
 
         if not importes_validos:
             continue
             
-        # Evaluación inteligente según la cantidad de columnas de dinero detectadas en la línea
-        # Si la línea tiene Saldo al final, posee 2 o más importes: el anteúltimo es el importe real.
-        # Si la línea no tiene Saldo al final, el único importe detectado es el valor real de la transacción.
+        # Si la línea tiene Saldo al final, tomamos el anteúltimo. Si no, tomamos el único.
         if len(importes_validos) >= 2:
             importe_real = importes_validos[-2]
         else:
-            importe_real = importes_validos[0]
+            importe_real = importes_validos[-1]
             
         descripcion = " ".join(tokens_descripcion)
         
-        # Determinar el sentido del movimiento basándonos en el concepto contable
+        # Determinar si es crédito o débito
         es_credito = False
         desc_upper = descripcion.upper()
         if any(kw in desc_upper for kw in ["RECIBIDA", "CREDITOS", "DEPOSITO", "ACREDITADO", "RECIBID"]):
@@ -146,15 +140,15 @@ if archivo_cargado is not None:
                 
                 desc_upper = desc.upper()
                 codigo_cuenta = cuenta_puente
-                nombre_cuenta = "CUENTA PUENTE REVISAR"
+                nombre_cuenta = "CUENTA PUENTE"
                 
                 for clave, datos in EQUIVALENCIAS_BASE.items():
                     if clave in desc_upper:
-                        codigo_cuenta = datos
-                        nombre_cuenta = datos
+                        # CORRECCIÓN AQUÍ: Separamos explícitamente el código numérico del texto
+                        codigo_cuenta = datos[0]
+                        nombre_cuenta = datos[1]
                         break
                 
-                # Definición estricta de signos de acuerdo a la naturaleza contable
                 if es_credito:
                     monto_imputacion = -importe
                     monto_banco = importe
@@ -162,13 +156,13 @@ if archivo_cargado is not None:
                     monto_imputacion = importe
                     monto_banco = -importe
                 
-                # Pase 1: Cuenta Destino Imputada
+                # Pase 1: Cuenta Destino Imputada (Formateada Limpia)
                 asientos_onvio.append({
                     "Número de asiento": asiento_actual,
                     "Número de Pase": pase_actual,
                     "Fecha": fecha,
                     "Concepto": "Asiento Resumen Bancario",
-                    "Código de cuenta": codigo_cuenta,
+                    "Código de cuenta": str(codigo_cuenta),
                     "Importe en moneda local": monto_imputacion,
                     "Importe en moneda ext.present.": 0.0,
                     "Leyenda": f"{nombre_cuenta} - {desc}",
@@ -185,7 +179,7 @@ if archivo_cargado is not None:
                     "Número de Pase": pase_actual,
                     "Fecha": fecha,
                     "Concepto": "Asiento Resumen Bancario",
-                    "Código de cuenta": CUENTA_BANCO_COMAFI,
+                    "Código de cuenta": str(CUENTA_BANCO_COMAFI),
                     "Importe en moneda local": monto_banco,
                     "Importe en moneda ext.present.": 0.0,
                     "Leyenda": f"COMAFI CTA CTE - {desc}",
@@ -218,4 +212,3 @@ if archivo_cargado is not None:
             )
         else:
             st.error("No se detectaron movimientos contables válidos en el archivo.")
-
