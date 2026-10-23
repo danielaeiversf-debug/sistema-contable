@@ -69,8 +69,10 @@ EQUIVALENCIAS_BASE = {
     "HONORARIOS": ("52020000", "HONORARIOS PROFESIONALES"),
 }
 
-# Barra lateral parametrizada
-st.sidebar.header("⚙️ Parámetros ONVIO")
+# Barra lateral parametrizada y con selectores avanzados para la empresa
+st.sidebar.header("⚙️ Configuración del Trabajo")
+banco_seleccionado = st.sidebar.selectbox("Seleccionar Banco", ["Banco Comafi", "Banco Santander (Próximamente)", "MercadoPago (Próximamente)"])
+plan_seleccionado = st.sidebar.selectbox("Plan de Cuentas Empresa", ["Asociación Civil 12 Casas", "S.R.L. Genérico", "S.A. Genérico"])
 nro_asiento_inicial = st.sidebar.number_input("Número de Asiento Inicial", min_value=1, value=1, step=1)
 cuenta_puente = st.sidebar.text_input("Cuenta Puente", value=CUENTA_PUENTE_DEF)
 
@@ -79,7 +81,7 @@ if st.sidebar.button("🔒 Cerrar Sesión"):
     st.rerun()
 
 st.markdown("### 1. Cargar Extractos Bancarios")
-archivos_cargados = st.file_uploader("Arrastrá uno o más PDFs del Banco Comafi a la vez", type=["pdf"], accept_multiple_files=True)
+archivos_cargados = st.file_uploader("Arrastrá uno o más PDFs del extracto bancario a la vez", type=["pdf"], accept_multiple_files=True)
 
 def procesar_lineas_comafi(text):
     movimientos = []
@@ -105,7 +107,10 @@ def procesar_lineas_comafi(text):
         if len(partes) == 0:
             continue
             
-        if re.match(r'^\d{2}/\d{2}/\d{2}$', partes[0]):
+        # SOLUCIÓN COMPLETA: Validar si la primera palabra es una fecha (partes[0])
+        tiene_fecha = re.match(r'^\d{2}/\d{2}/\d{2}$', partes[0])
+        
+        if tiene_fecha:
             fecha_en_memoria = partes[0]
             if "Saldo Anterior" in linea:
                 continue
@@ -190,8 +195,8 @@ if archivos_cargados:
                 
                 for clave, datos in EQUIVALENCIAS_BASE.items():
                     if clave in desc_upper:
-                        codigo_cuenta = datos[0]
-                        nombre_cuenta = datos[1]
+                        codigo_cuenta = datos
+                        nombre_cuenta = datos
                         break
                 
                 if es_credito:
@@ -235,13 +240,3 @@ if archivos_cargados:
                 
             asiento_actual += 1
             
-        df_resultado = pd.DataFrame(asientos_onvio)
-        
-        if not df_resultado.empty:
-            st.write("#### Planilla estructurada para ONVIO:")
-            st.dataframe(df_resultado)
-            
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df_resultado.to_excel(writer, index=False, sheet_name='Importacion_ONVIO')
-            excel_data = output.getvalue()
