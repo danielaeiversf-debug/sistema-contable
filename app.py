@@ -26,7 +26,6 @@ if not st.session_state["autenticado"]:
     st.title("🔐 Acceso Restringido - Estudio Contable")
     clave_ingresada = st.text_input("Introduzca la clave de acceso del sector:", type="password")
     if st.button("Ingresar al Sistema"):
-        # Podés cambiar 'sociedades2026' por la contraseña compartida que prefieran
         if clave_ingresada == "sociedades2026":
             st.session_state["autenticado"] = True
             st.rerun()
@@ -80,7 +79,6 @@ if st.sidebar.button("🔒 Cerrar Sesión"):
     st.rerun()
 
 st.markdown("### 1. Cargar Extractos Bancarios")
-# NUEVO: accept_multiple_files=True permite arrastrar los 12 meses juntos
 archivos_cargados = st.file_uploader("Arrastrá uno o más PDFs del Banco Comafi a la vez", type=["pdf"], accept_multiple_files=True)
 
 def procesar_lineas_comafi(text):
@@ -94,7 +92,6 @@ def procesar_lineas_comafi(text):
     for linea in lineas:
         linea_upper = linea.upper()
         
-        # FILTRO DE EXCLUSIÓN TOTAL PARA TRANSPORTES Y TEXTOS LEGALES FLOTANTES
         if any(keyword in linea_upper for keyword in ["TRANSPORTE", "GARANTIA DE HASTA", "LEY 24.485", "DECRETO 540/95", "CIRCULAR OPASI"]):
             continue 
             
@@ -108,14 +105,10 @@ def procesar_lineas_comafi(text):
         if len(partes) == 0:
             continue
             
-        # Comprobar si arranca con fecha (DD/MM/YY)
-        tiene_fecha = re.match(r'^\d{2}/\d{2}/\d{2}$', partes[0])
-        
-        if tiene_fecha:
+        if re.match(r'^\d{2}/\d{2}/\d{2}$', partes[0]):
             fecha_en_memoria = partes[0]
             if "Saldo Anterior" in linea:
                 continue
-            # Guardamos los textos filtrando números largos de referencia pero SIN romper el renglón
             concepto_acumulado = " ".join([x for x in partes[1:] if not re.match(r'^\d{6,12}$', x) and "," not in x])
         else:
             if not fecha_en_memoria:
@@ -124,9 +117,10 @@ def procesar_lineas_comafi(text):
             if texto_secundario:
                 concepto_acumulado += " " + texto_secundario
 
-        # Extraer importes financieros representados con coma decimal
         importes_validos = []
         for token in partes:
+            if re.match(r'^\d{6,12}$', token): 
+                continue
             token_clean = token.replace(".", "").replace(",", ".")
             if token_clean.endswith("-"):
                 token_clean = "-" + token_clean[:-1]
@@ -140,7 +134,6 @@ def procesar_lineas_comafi(text):
         if not importes_validos:
             continue  
             
-        # Detección y descarte del Saldo del periodo
         if len(importes_validos) >= 2:
             importe_real = importes_validos[-2]
         else:
@@ -159,7 +152,6 @@ def procesar_lineas_comafi(text):
             "Importe": abs(importe_real),
             "EsCredito": es_credito
         })
-        
         concepto_acumulado = ""
         
     return movimientos
@@ -167,7 +159,6 @@ def procesar_lineas_comafi(text):
 if archivos_cargados:
     movimientos_totales = []
     
-    # Procesar secuencialmente cada uno de los archivos cargados
     for archivo in archivos_cargados:
         with pdfplumber.open(archivo) as pdf:
             for page in pdf.pages:
@@ -178,7 +169,7 @@ if archivos_cargados:
     df_origen = pd.DataFrame(movimientos_totales)
 
     if not df_origen.empty:
-        st.success(f"🔥 ¡Éxito! Se procesaron {len(archivos_cargados)} archivos y se extrajeron {len(df_origen)} transacciones correlativas.")
+        st.success(f"🔥 ¡Éxito! Se procesaron {len(archivos_cargados)} archivos y se extrajeron {len(df_origen)} transacciones.")
         
         asientos_onvio = []
         asiento_actual = nro_asiento_inicial
@@ -210,7 +201,6 @@ if archivos_cargados:
                     monto_imputacion = importe
                     monto_banco = -importe
                 
-                # Pase 1: Cuenta Destino Imputada
                 asientos_onvio.append({
                     "Número de asiento": asiento_actual,
                     "Número de Pase": pase_actual,
@@ -227,7 +217,6 @@ if archivos_cargados:
                 })
                 pase_actual += 1
                 
-                # Pase 2: Contrapartida de Banco Comafi
                 asientos_onvio.append({
                     "Número de asiento": asiento_actual,
                     "Número de Pase": pase_actual,
@@ -240,3 +229,19 @@ if archivos_cargados:
                     "Código de centro de costos": "",
                     "Porcentaje de distribución": "",
                     "Imp.mon.local dist.C.Costos": "",
+                    "Imp.mon.present.dist.C.Costos": ""
+                })
+                pase_actual += 1
+                
+            asiento_actual += 1
+            
+        df_resultado = pd.DataFrame(asientos_onvio)
+        
+        if not df_resultado.empty:
+            st.write("#### Planilla estructurada para ONVIO:")
+            st.dataframe(df_resultado)
+            
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_resultado.to_excel(writer, index=False, sheet_name='Importacion_ONVIO')
+            excel_data = output.getvalue()
