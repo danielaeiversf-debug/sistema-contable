@@ -3,6 +3,7 @@ import pandas as pd
 import pdfplumber
 import io
 import re
+import unicodedata
 
 # Configuración visual de Streamlit (Ligada al sector y más corporativa)
 st.set_page_config(page_title="ONVIO Automatizador - Sector Sociedades", layout="wide")
@@ -42,31 +43,52 @@ st.subheader("Asociaciones Civiles - Motor de Importación Directa para 'ONVIO'"
 CUENTA_BANCO_COMAFI = "11016010"  # CTA/CTE $ COMAFI 1070-01085-6
 CUENTA_PUENTE_DEF = "13000000"
 
+# Las claves se comparan SIN acentos, puntos ni guiones ("Débitos" = "DEBITOS", "Caj.Aut." = "CAJ AUT").
+# Se recorre en orden y gana la PRIMERA clave que aparece en la descripción.
+
+# a) Solo para movimientos que el banco informa en la columna CRÉDITOS (ingresos)
+EQUIVALENCIAS_CREDITO = {
+    "DEPOSITO": ("11011000", "CAJA"),
+    "CAJ AUT": ("11011000", "CAJA"),
+    "RECIB": ("11031010", "DEUDORES POR SERVICIOS"),
+    "CVU": ("11031010", "DEUDORES POR SERVICIOS"),
+    "TERCEROS": ("11031010", "DEUDORES POR SERVICIOS"),
+    "TRANSF": ("11031010", "DEUDORES POR SERVICIOS"),
+    "DATAN": ("11031010", "DEUDORES POR SERVICIOS"),
+    "OURENSE": ("11031010", "DEUDORES POR SERVICIOS"),
+}
+
+# b) Para todos los movimientos (débitos, y créditos que no entraron en la lista anterior)
 EQUIVALENCIAS_BASE = {
-    "MANTENIMIENTO DE": ("53010000", "GASTOS BANCARIOS"),
-    "COMISION EMISION": ("53010000", "GASTOS BANCARIOS"),
-    "COMISION TRANSFERENCIAS": ("53010000", "GASTOS BANCARIOS"),
+    "IMPUESTO A LOS CRED": ("53080000", "IMPUESTO CRED LEY 25413"),
+    "CREDITOS TASA": ("53080000", "IMPUESTO CRED LEY 25413"),
+    "CRED LEY 25413": ("53080000", "IMPUESTO CRED LEY 25413"),
+    "IMPUESTO A LOS DEB": ("53070000", "IMPUESTO DEB LEY 25413"),
+    "DEBITOS TASA": ("53070000", "IMPUESTO DEB LEY 25413"),
+    "DEBITOS ART 45": ("53070000", "IMPUESTO DEB LEY 25413"),
+    "DEB LEY 25413": ("53070000", "IMPUESTO DEB LEY 25413"),
+    "IVA ALICUOTA": ("11032050", "DGI IVA RET. Y PERCEPCIONES"),
+    "SELLO": ("53010000", "GASTOS BANCARIOS"),
+    "BANELCO": ("53010000", "GASTOS BANCARIOS"),
+    "MANTENIMIENTO": ("53010000", "GASTOS BANCARIOS"),
     "COMISION": ("53010000", "GASTOS BANCARIOS"),
+    "INTERES": ("51010000", "INTERESES BANCARIOS"),
+    "DESCUBIERTO": ("51010000", "INTERESES BANCARIOS"),
+    "HABERES": ("21012010", "PROVEEDORES"),
+    "SUELDOS": ("21013010", "SUELDOS Y JORNALES A PAGAR"),
+    "HONORARIOS": ("52020000", "HONORARIOS PROFESIONALES"),
+    "DEPOSITO": ("11011000", "CAJA"),
+    "CAJ AUT": ("11011000", "CAJA"),
+    "RECIB": ("11031010", "DEUDORES POR SERVICIOS"),
+    "DATAN": ("11031010", "DEUDORES POR SERVICIOS"),
+    "OURENSE": ("11031010", "DEUDORES POR SERVICIOS"),
     "PAGO ELECTRONICO": ("21012010", "PROVEEDORES"),
     "PAGO DE SERVICIOS": ("21012010", "PROVEEDORES"),
     "PAGO DE CHEQUE": ("21012010", "PROVEEDORES"),
     "EBANKIN": ("21012010", "PROVEEDORES"),
+    "TERCEROS": ("21012010", "PROVEEDORES"),
+    "TRANSF": ("21012010", "PROVEEDORES"),
     "PROV": ("21012010", "PROVEEDORES"),
-    "RECIBIDA": ("11031010", "DEUDORES POR SERVICIOS"),
-    "RECIBID": ("11031010", "DEUDORES POR SERVICIOS"),
-    "DATAN": ("11031010", "DEUDORES POR SERVICIOS"),
-    "OURENSE": ("11031010", "DEUDORES POR SERVICIOS"),
-    "DEPOSITO": ("11011000", "CAJA"),
-    "DEBITOS - TASA": ("53070000", "IMPUESTO DEB LEY 25413"),
-    "DEBITOS ART 45": ("53070000", "IMPUESTO DEB LEY 25413"),
-    "DEB LEY 25413": ("53070000", "IMPUESTO DEB LEY 25413"),
-    "IMPUESTO A LOS DEBITOS": ("53070000", "IMPUESTO DEB LEY 25413"),
-    "CREDITOS-TASA G": ("53080000", "IMPUESTO CRED LEY 25413"),
-    "CRED LEY 25413": ("53080000", "IMPUESTO CRED LEY 25413"),
-    "IMPUESTO A LOS CREDITOS": ("53080000", "IMPUESTO CRED LEY 25413"),
-    "IVA - ALICUOTA": ("11032050", "DGI IVA RET. Y PERCEPCIONES"),
-    "SUELDOS": ("21013010", "SUELDOS Y JORNALES A PAGAR"),
-    "HONORARIOS": ("52020000", "HONORARIOS PROFESIONALES"),
 }
 
 # Barra lateral parametrizada y con selectores avanzados para la empresa
@@ -85,30 +107,71 @@ archivos_cargados = st.file_uploader("Arrastrá uno o más PDFs del extracto ban
 
 MARCA_SALTO_HOJA = "<<<SALTO_DE_HOJA>>>"
 
-# Palabras que indican crédito (ingreso al banco)
-CLAVES_CREDITO = ["RECIBIDA", "CREDITOS", "DEPOSITO", "ACREDITADO", "RECIBID", "TONELLI", "CPS", "OURENSE"]
-# Excepciones: contienen "CREDITOS" pero son DÉBITOS (impuesto Ley 25413 sobre créditos)
-CLAVES_DEBITO_FORZADO = ["IMPUESTO A LOS CREDITOS", "CREDITOS-TASA", "CRED LEY 25413"]
+# Solo se usan si no se pudo ubicar la columna Débitos/Créditos del importe
+CLAVES_CREDITO = ["RECIB", "DEPOSITO", "ACREDITADO", "CAJ AUT", "CVU", "TONELLI", "CPS", "OURENSE", "DATAN"]
+CLAVES_DEBITO_FORZADO = ["IMPUESTO A LOS CRED", "CREDITOS TASA", "CRED LEY 25413"]
+
+def normalizar(texto):
+    """Mayúsculas, sin acentos y sin signos: 'Depósito Caj.Aut. Propio' -> 'DEPOSITO CAJ AUT PROPIO'"""
+    t = unicodedata.normalize("NFKD", str(texto))
+    t = "".join(c for c in t if not unicodedata.combining(c)).upper()
+    return " ".join(re.sub(r"[^A-Z0-9]+", " ", t).split())
+
+def asignar_cuenta(descripcion, es_credito, cuenta_puente):
+    desc = " " + normalizar(descripcion) + " "
+    tablas = [EQUIVALENCIAS_CREDITO, EQUIVALENCIAS_BASE] if es_credito else [EQUIVALENCIAS_BASE]
+    for tabla in tablas:
+        for clave, datos in tabla.items():
+            if normalizar(clave) in desc:
+                return str(datos[0]), str(datos[1])
+    return str(cuenta_puente), "CUENTA PUENTE"
 
 def es_importe(token):
     """True si el token tiene formato de importe: 1.234,56 / 1,25 / 1.234,56-"""
     return re.match(r'^-?\d{1,3}(\.\d{3})*,\d{2}-?$', token) is not None
 
-def procesar_lineas_comafi(text):
+def lineas_pdf(pdf):
+    """Lee el PDF línea por línea. Cada línea es una lista de (palabra, borde derecho en la hoja),
+    para saber en qué columna (Débitos / Créditos / Saldo) está cada importe."""
+    salida = []
+    for nro, page in enumerate(pdf.pages):
+        if nro > 0:
+            salida.append([(MARCA_SALTO_HOJA, None)])
+        for l in page.extract_text_lines():
+            tokens = l["text"].split()
+            chars = [c for c in l.get("chars", []) if not c["text"].isspace()]
+            coincide = sum(len(t) for t in tokens) == len(chars)
+            fila, pos = [], 0
+            for t in tokens:
+                if coincide:
+                    pos += len(t)
+                    fila.append((t, chars[pos - 1]["x1"]))
+                else:
+                    fila.append((t, None))
+            salida.append(fila)
+    return salida
+
+def procesar_lineas_comafi(filas):
     movimientos = []
-    lineas = text.split("\n")
     
     fecha_en_memoria = None
     concepto_acumulado = ""
     freno_activado = False
     en_corte_de_hoja = False  # entre el "Transporte" de una hoja y el primer importe de la siguiente
     movimiento_pendiente = False  # fecha + descripción sin importe, esperando el monto en la línea/hoja siguiente
+    columnas_x = None  # posición de los encabezados Débitos / Créditos / Saldo
     
-    for linea in lineas:
-        linea_upper = linea.upper()
-        partes = linea.split()
+    def columna_de(x):
+        if x is None or not columnas_x:
+            return None
+        return min(columnas_x, key=lambda k: abs(columnas_x[k] - x))
+    
+    for fila in filas:
+        partes = [t for t, _ in fila]
         if len(partes) == 0:
             continue
+        linea = " ".join(partes)
+        linea_upper = linea.upper()
         
         # Salto de hoja: igual que antes, cada hoja arranca de cero...
         if linea.strip() == MARCA_SALTO_HOJA:
@@ -118,6 +181,16 @@ def procesar_lineas_comafi(text):
             if not movimiento_pendiente:
                 fecha_en_memoria = None
                 concepto_acumulado = ""
+            continue
+        
+        # Encabezado de columnas: se guarda dónde están Débitos / Créditos / Saldo
+        norm = [normalizar(t) for t in partes]
+        if "DEBITOS" in norm and "CREDITOS" in norm and "SALDO" in norm:
+            pos = {}
+            for (t, x), n in zip(fila, norm):
+                if n in ("DEBITOS", "CREDITOS", "SALDO") and x is not None:
+                    pos[n] = x
+            columnas_x = pos if len(pos) == 3 else columnas_x
             continue
         
         # "Transporte 0,00" solo cuando es la PRIMERA palabra de la línea
@@ -160,30 +233,33 @@ def procesar_lineas_comafi(text):
             if texto_secundario:
                 concepto_acumulado += " " + texto_secundario
 
-        importes_validos = []
-        for token in partes:
+        importes_validos = []  # (valor, columna)
+        for token, x in fila:
             if not es_importe(token):
                 continue
             token_clean = token.replace(".", "").replace(",", ".")
             if token_clean.endswith("-"):
                 token_clean = "-" + token_clean[:-1]
-            importes_validos.append(float(token_clean))
+            importes_validos.append((float(token_clean), columna_de(x)))
 
         if not importes_validos:
             continue  
         
         en_corte_de_hoja = False
-            
-        if len(importes_validos) >= 2:
-            importe_real = importes_validos[-2]
-        else:
-            importe_real = importes_validos[-1]
-            
         desc_final = concepto_acumulado.strip()
         
-        desc_upper = desc_final.upper()
-        es_credito = (any(kw in desc_upper for kw in CLAVES_CREDITO)
-                      and not any(kw in desc_upper for kw in CLAVES_DEBITO_FORZADO))
+        # Débito o crédito según la COLUMNA donde el banco puso el importe
+        en_columna = [(v, c) for v, c in importes_validos if c in ("DEBITOS", "CREDITOS")]
+        if en_columna:
+            importe_real, col = en_columna[0]
+            es_credito = (col == "CREDITOS")
+        else:
+            # Sin columnas detectadas: criterio anterior (penúltimo importe + palabras clave)
+            valores = [v for v, _ in importes_validos]
+            importe_real = valores[-2] if len(valores) >= 2 else valores[-1]
+            desc_norm = normalizar(desc_final)
+            es_credito = (any(kw in desc_norm for kw in CLAVES_CREDITO)
+                          and not any(kw in desc_norm for kw in CLAVES_DEBITO_FORZADO))
             
         movimientos.append({
             "Fecha": str(fecha_en_memoria), # Forzado a texto plano
@@ -203,14 +279,14 @@ if archivos_cargados:
         # Se procesa el PDF completo de una vez (no hoja por hoja) para no perder
         # movimientos cuya fecha queda al pie de una hoja y el importe en la siguiente
         with pdfplumber.open(archivo) as pdf:
-            texto_completo = f"\n{MARCA_SALTO_HOJA}\n".join((page.extract_text() or "") for page in pdf.pages)
-        movimientos_totales.extend(procesar_lineas_comafi(texto_completo))
+            movimientos_totales.extend(procesar_lineas_comafi(lineas_pdf(pdf)))
                 
     if movimientos_totales:
         df_origen = pd.DataFrame(movimientos_totales)
         st.success(f"🔥 ¡Éxito! Se procesaron {len(archivos_cargados)} archivos sueltos y se extrajeron {len(df_origen)} transacciones reales.")
         
         filas_planilla = []
+        sin_cuenta = []
         asiento_actual = int(nro_asiento_inicial)
         fechas_unicas = df_origen["Fecha"].unique()
         
@@ -223,15 +299,9 @@ if archivos_cargados:
                 importe = fila["Importe"]
                 es_credito = fila["EsCredito"]
                 
-                desc_upper = desc.upper()
-                codigo_cuenta = str(cuenta_puente)
-                nombre_cuenta = "CUENTA PUENTE"
-                
-                for clave, datos in EQUIVALENCIAS_BASE.items():
-                    if clave in desc_upper:
-                        codigo_cuenta = str(datos[0])
-                        nombre_cuenta = str(datos[1])
-                        break
+                codigo_cuenta, nombre_cuenta = asignar_cuenta(desc, es_credito, cuenta_puente)
+                if nombre_cuenta == "CUENTA PUENTE":
+                    sin_cuenta.append({"Descripción": desc, "Tipo": "Crédito" if es_credito else "Débito", "Importe": importe})
                 
                 if es_credito:
                     monto_imputacion = -importe
@@ -259,6 +329,14 @@ if archivos_cargados:
         
         if not df_resultado.empty:
             st.markdown("### 2. Previsualización y Control")
+            if sin_cuenta:
+                df_sin = (pd.DataFrame(sin_cuenta).groupby(["Descripción", "Tipo"], as_index=False)
+                          .agg(Movimientos=("Importe", "size"), Total=("Importe", "sum"))
+                          .sort_values("Movimientos", ascending=False))
+                st.warning(f"⚠️ {len(sin_cuenta)} movimientos quedaron en Cuenta Puente ({cuenta_puente}). "
+                           "Agregá su texto en las equivalencias para imputarlos.")
+                with st.expander("Ver descripciones que fueron a Cuenta Puente"):
+                    st.dataframe(df_sin, use_container_width=True, hide_index=True)
             st.dataframe(df_resultado)
             
             st.markdown("### 3. Exportación Final")
