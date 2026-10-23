@@ -83,21 +83,45 @@ if st.sidebar.button("🔒 Cerrar Sesión"):
 st.markdown("### 1. Cargar Extractos Bancarios")
 archivos_cargados = st.file_uploader("Arrastrá uno o más PDFs del extracto bancario a la vez", type=["pdf"], accept_multiple_files=True)
 
-# Inicializar variables globales de memoria inter-hojas de forma segura
-if "fecha_global" not in st.session_state:
-    st.session_state["fecha_global"] = None
-if "concepto_global" not in st.session_state:
-    st.session_state["concepto_global"] = ""
+MARCA_SALTO_HOJA = "<<<SALTO_DE_HOJA>>>"
+
+# Palabras que indican crédito (ingreso al banco)
+CLAVES_CREDITO = ["RECIBIDA", "CREDITOS", "DEPOSITO", "ACREDITADO", "RECIBID", "TONELLI", "CPS", "OURENSE"]
+# Excepciones: contienen "CREDITOS" pero son DÉBITOS (impuesto Ley 25413 sobre créditos)
+CLAVES_DEBITO_FORZADO = ["IMPUESTO A LOS CREDITOS", "CREDITOS-TASA", "CRED LEY 25413"]
+
+def es_importe(token):
+    """True si el token tiene formato de importe: 1.234,56 / 1,25 / 1.234,56-"""
+    return re.match(r'^-?\d{1,3}(\.\d{3})*,\d{2}-?$', token) is not None
 
 def procesar_lineas_comafi(text):
     movimientos = []
     lineas = text.split("\n")
+    
+    fecha_en_memoria = None
+    concepto_acumulado = ""
     freno_activado = False
+    en_corte_de_hoja = False  # entre el "Transporte" de una hoja y el primer importe de la siguiente
     
     for linea in lineas:
         linea_upper = linea.upper()
+        partes = linea.split()
+        if len(partes) == 0:
+            continue
         
-        if any(keyword in linea_upper for keyword in ["TRANSPORTE", "GARANTIA DE HASTA", "LEY 24.485", "DECRETO 540/95", "CIRCULAR OPASI"]):
+        # Salto de hoja: se conserva la fecha y la descripción pendientes
+        if linea.strip() == MARCA_SALTO_HOJA:
+            freno_activado = False
+            en_corte_de_hoja = True
+            continue
+        
+        # "Transporte 0,00" solo cuando es la PRIMERA palabra de la línea
+        # (antes se descartaba cualquier línea con "TRANSPORTE", como "OURENSE TRANSPORTES SA 2.600.000,00")
+        if partes[0].upper() == "TRANSPORTE":
+            en_corte_de_hoja = True
+            continue
+        
+        if any(keyword in linea_upper for keyword in ["GARANTIA DE HASTA", "GARANTÍA DE HASTA", "LEY 24.485", "DECRETO 540/95", "CIRCULAR OPASI"]):
             continue 
             
         if "SALDO AL:" in linea_upper or "IMPUESTOS DEBITADOS" in linea_upper or "BASE IMPONIBLE" in linea_upper:
@@ -106,76 +130,72 @@ def procesar_lineas_comafi(text):
         if freno_activado:
             continue 
             
-        partes = linea.split()
-        if len(partes) == 0:
-            continue
-            
-        # Comprobar de forma segura si la primera posición es una fecha (DD/MM/YY)
-        primer_item = partes[0]
-        tiene_fecha = re.match(r'^\d{2}/\d{2}/\d{2}$', primer_item)
+        # EXTRACCIÓN CORRECTA DE FECHA: Asegurar que se guarde como string puro de texto
+        primer_token = str(partes[0])
+        tiene_fecha = re.match(r'^\d{2}/\d{2}/\d{2}$', primer_token)
+        hay_importe = any(es_importe(x) for x in partes)
         
         if tiene_fecha:
-            st.session_state["fecha_global"] = str(primer_item)
+            fecha_en_memoria = primer_token
+            en_corte_de_hoja = False
             if "Saldo Anterior" in linea:
+                concepto_acumulado = ""
                 continue
-            st.session_state["concepto_global"] = " ".join([x for x in partes[1:] if not re.match(r'^\d{6,12}$', x) and "," not in x])
+            concepto_acumulado = " ".join([x for x in partes[1:] if not re.match(r'^\d{6,12}$', x) and "," not in x])
         else:
-            if not st.session_state["fecha_global"]:
+            if not fecha_en_memoria:
+                continue
+            # Entre hojas: encabezados y leyendas legales sin importe no se suman a la descripción
+            if en_corte_de_hoja and not hay_importe:
                 continue
             texto_secundario = " ".join([x for x in partes if not re.match(r'^\d{6,12}$', x) and "," not in x])
             if texto_secundario:
-                st.session_state["concepto_global"] += " " + texto_secundario
+                concepto_acumulado += " " + texto_secundario
 
         importes_validos = []
         for token in partes:
-            if re.match(r'^\d{6,12}$', token): 
+            if not es_importe(token):
                 continue
             token_clean = token.replace(".", "").replace(",", ".")
             if token_clean.endswith("-"):
                 token_clean = "-" + token_clean[:-1]
-            try:
-                if "," in token: 
-                    val = float(token_clean)
-                    importes_validos.append(val)
-            except ValueError:
-                continue
+            importes_validos.append(float(token_clean))
 
         if not importes_validos:
             continue  
+        
+        en_corte_de_hoja = False
             
         if len(importes_validos) >= 2:
             importe_real = importes_validos[-2]
         else:
             importe_real = importes_validos[-1]
             
-        desc_final = st.session_state["concepto_global"].strip()
+        desc_final = concepto_acumulado.strip()
         
-        es_credito = False
         desc_upper = desc_final.upper()
-        if any(kw in desc_upper for kw in ["RECIBIDA", "CREDITOS", "DEPOSITO", "ACREDITADO", "RECIBID", "TONELLI", "CPS", "OURENSE", "TRANSPORTES"]):
-            es_credito = True
+        es_credito = (any(kw in desc_upper for kw in CLAVES_CREDITO)
+                      and not any(kw in desc_upper for kw in CLAVES_DEBITO_FORZADO))
             
         movimientos.append({
-            "Fecha": str(st.session_state["fecha_global"]),
+            "Fecha": str(fecha_en_memoria), # Forzado a texto plano
             "Descripción": desc_final,
             "Importe": abs(importe_real),
             "EsCredito": es_credito
         })
-        st.session_state["concepto_global"] = ""
+        concepto_acumulado = ""
         
     return movimientos
 
 if archivos_cargados:
     movimientos_totales = []
-    st.session_state["fecha_global"] = None
-    st.session_state["concepto_global"] = ""
     
     for archivo in archivos_cargados:
+        # Se procesa el PDF completo de una vez (no hoja por hoja) para no perder
+        # movimientos cuya fecha queda al pie de una hoja y el importe en la siguiente
         with pdfplumber.open(archivo) as pdf:
-            for page in pdf.pages:
-                text = page.extract_text()
-                if text:
-                    movimientos_totales.extend(procesar_lineas_comafi(text))
+            texto_completo = f"\n{MARCA_SALTO_HOJA}\n".join((page.extract_text() or "") for page in pdf.pages)
+        movimientos_totales.extend(procesar_lineas_comafi(texto_completo))
                 
     if movimientos_totales:
         df_origen = pd.DataFrame(movimientos_totales)
@@ -211,7 +231,7 @@ if archivos_cargados:
                     monto_imputacion = float(importe)
                     monto_banco = -importe
                 
-                filas_planilla.append([int(asiento_actual), int(pase_actual), str(fecha), "Asiento Resumen Bancario", codigo_cuenta, float(monto_imputacion), 0.0, f"{nombre_cuenta} - {desc}", "", "", "", ""])
+                filas_planilla.append([int(asiento_actual), int(pase_actual), str(fecha), "Asiento Resumen Bancario", str(codigo_cuenta), float(monto_imputacion), 0.0, f"{nombre_cuenta} - {desc}", "", "", "", ""])
                 pase_actual += 1
                 
                 filas_planilla.append([int(asiento_actual), int(pase_actual), str(fecha), "Asiento Resumen Bancario", str(CUENTA_BANCO_COMAFI), float(monto_banco), 0.0, f"COMAFI CTA CTE - {desc}", "", "", "", ""])
@@ -225,7 +245,25 @@ if archivos_cargados:
             "Código de centro de costos", "Porcentaje de distribución", 
             "Imp.mon.local dist.C.Costos", "Imp.mon.present.dist.C.Costos"
         ]
+        
         df_resultado = pd.DataFrame(filas_planilla, columns=columnas_onvio)
         
         if not df_resultado.empty:
             st.markdown("### 2. Previsualización y Control")
+            st.dataframe(df_resultado)
+            
+            st.markdown("### 3. Exportación Final")
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_resultado.to_excel(writer, index=False, sheet_name='Importacion_ONVIO')
+            excel_data = output.getvalue()
+            
+            st.download_button(
+                label="📥 Descargar Excel para importar en ONVIO",
+                data=excel_data,
+                file_name=f"Importacion_ONVIO_{pd.Timestamp.today():%Y%m%d}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+    else:
+        st.warning("⚠️ No se encontraron movimientos en los PDFs cargados.")
