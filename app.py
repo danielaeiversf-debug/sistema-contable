@@ -13,7 +13,7 @@ st.subheader("Asociaciones Civiles - Motor de Importación Directa para 'ONVIO'"
 CUENTA_BANCO_COMAFI = "11016010"  # CTA/CTE $ COMAFI 1070-01085-6
 CUENTA_PUENTE_DEF = "13000000"
 
-# 2. MAPEO FLEXIBILIZADO CON PALABRAS CLAVE UNIVERSALES (Evita desvíos a Cuenta Puente)
+# 2. MAPEO FLEXIBILIZADO CON PALABRAS CLAVE UNIVERSALES
 EQUIVALENCIAS_BASE = {
     "MANTENIMIENTO DE": ("53010000", "GASTOS BANCARIOS"),
     "COMISION EMISION": ("53010000", "GASTOS BANCARIOS"),
@@ -82,9 +82,11 @@ def procesar_lineas_comafi(text):
         if len(partes) == 0:
             continue
             
-        # Validar si el primer elemento es una fecha (DD/MM/YY)
-        if re.match(r'^\d{2}/\d{2}/\d{2}$', partes):
-            fecha_en_memoria = partes
+        # SOLUCIÓN: Comprobar si la primera palabra de la línea (partes[0]) es una fecha válida (DD/MM/YY)
+        tiene_fecha = re.match(r'^\d{2}/\d{2}/\d{2}$', partes[0])
+        
+        if tiene_fecha:
+            fecha_en_memoria = partes[0]
             if "Saldo Anterior" in linea:
                 continue
             concepto_acumulado = " ".join([x for x in partes[1:] if not re.match(r'^\d{6,12}$', x) and "," not in x])
