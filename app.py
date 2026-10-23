@@ -83,7 +83,7 @@ if st.sidebar.button("🔒 Cerrar Sesión"):
 st.markdown("### 1. Cargar Extractos Bancarios")
 archivos_cargados = st.file_uploader("Arrastrá uno o más PDFs del extracto bancario a la vez", type=["pdf"], accept_multiple_files=True)
 
-# Inicializar variables globales de memoria en el estado de sesión si no existen
+# Inicializar variables globales de memoria inter-hojas de forma segura
 if "fecha_global" not in st.session_state:
     st.session_state["fecha_global"] = None
 if "concepto_global" not in st.session_state:
@@ -110,6 +110,7 @@ def procesar_lineas_comafi(text):
         if len(partes) == 0:
             continue
             
+        # Comprobar de forma segura si la primera posición es una fecha (DD/MM/YY)
         primer_item = partes[0]
         tiene_fecha = re.match(r'^\d{2}/\d{2}/\d{2}$', primer_item)
         
@@ -210,32 +211,21 @@ if archivos_cargados:
                     monto_imputacion = float(importe)
                     monto_banco = -importe
                 
-                filas_planilla.append([asiento_actual, pase_actual, str(fecha), "Asiento Resumen Bancario", codigo_cuenta, float(monto_imputacion), 0.0, f"{nombre_cuenta} - {desc}", "", "", "", ""])
+                filas_planilla.append([int(asiento_actual), int(pase_actual), str(fecha), "Asiento Resumen Bancario", codigo_cuenta, float(monto_imputacion), 0.0, f"{nombre_cuenta} - {desc}", "", "", "", ""])
                 pase_actual += 1
                 
-                filas_planilla.append([asiento_actual, pase_actual, str(fecha), "Asiento Resumen Bancario", str(CUENTA_BANCO_COMAFI), float(monto_banco), 0.0, f"COMAFI CTA CTE - {desc}", "", "", "", ""])
+                filas_planilla.append([int(asiento_actual), int(pase_actual), str(fecha), "Asiento Resumen Bancario", str(CUENTA_BANCO_COMAFI), float(monto_banco), 0.0, f"COMAFI CTA CTE - {desc}", "", "", "", ""])
                 pase_actual += 1
                 
             asiento_actual += 1
             
-        columnas_onvio = ["Número de asiento", "Número de Pase", "Fecha", "Concepto", "Código de cuenta", "Importe en moneda local", "Importe en moneda ext.present.", "Leyenda", "Código de centro de costos", "Porcentaje de distribución", "Imp.mon.local dist.C.Costos", "Imp.mon.present.dist.C.Costos"]
+        columnas_onvio = [
+            "Número de asiento", "Número de Pase", "Fecha", "Concepto", "Código de cuenta",
+            "Importe en moneda local", "Importe en moneda ext.present.", "Leyenda",
+            "Código de centro de costos", "Porcentaje de distribución", 
+            "Imp.mon.local dist.C.Costos", "Imp.mon.present.dist.C.Costos"
+        ]
         df_resultado = pd.DataFrame(filas_planilla, columns=columnas_onvio)
         
         if not df_resultado.empty:
             st.markdown("### 2. Previsualización y Control")
-            st.dataframe(df_resultado)
-            
-            st.markdown("### 3. Exportación Final")
-            output = io.BytesIO()
-with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df_resultado.to_excel(writer, index=False, sheet_name='Importacion_ONVIO')
-            excel_data = output.getvalue()     
-st.download_button(
-                label="📥 Descargar Excel para importar en ONVIO",
-                data=excel_data,
-                file_name=f"Importacion_ONVIO_{pd.Timestamp.today():%Y%m%d}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-            )
-    else:
-        st.warning("⚠️ No se encontraron movimientos en los PDFs cargados.")
