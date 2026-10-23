@@ -198,8 +198,8 @@ if archivos_cargados:
                 
                 for clave, datos in EQUIVALENCIAS_BASE.items():
                     if clave in desc_upper:
-                        codigo_cuenta = datos
-                        nombre_cuenta = datos
+                        codigo_cuenta = datos[0]
+                        nombre_cuenta = datos[1]
                         break
                 
                 if es_credito:
@@ -209,8 +209,8 @@ if archivos_cargados:
                     monto_imputacion = importe
                     monto_banco = -importe
                 
-                # Formateo estricto del bloque de datos para ONVIO
-                pase_1 = {
+                # Desglose de pases estructurados limpios
+                asientos_onvio.append({
                     "Número de asiento": asiento_actual,
                     "Número de Pase": pase_actual,
                     "Fecha": fecha,
@@ -223,11 +223,10 @@ if archivos_cargados:
                     "Porcentaje de distribución": "",
                     "Imp.mon.local dist.C.Costos": "",
                     "Imp.mon.present.dist.C.Costos": ""
-                }
-                asientos_onvio.append(pase_1)
+                })
                 pase_actual += 1
                 
-                pase_2 = {
+                asientos_onvio.append({
                     "Número de asiento": asiento_actual,
                     "Número de Pase": pase_actual,
                     "Fecha": fecha,
@@ -240,4 +239,5 @@ if archivos_cargados:
                     "Porcentaje de distribución": "",
                     "Imp.mon.local dist.C.Costos": "",
                     "Imp.mon.present.dist.C.Costos": ""
-                }
+                })
+
