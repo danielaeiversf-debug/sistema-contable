@@ -107,7 +107,6 @@ def procesar_lineas_comafi(text):
         if len(partes) == 0:
             continue
             
-        # CORRECCIÓN DEFINITIVA DE INDEXACIÓN: Extraer el primer token de texto de forma segura antes de evaluar la fecha
         primer_elemento = str(partes[0])
         es_una_fecha = False
         
@@ -183,8 +182,8 @@ if archivos_cargados:
     if not df_origen.empty:
         st.success(f"🔥 ¡Éxito! Se procesaron {len(archivos_cargados)} archivos sueltos y se extrajeron {len(df_origen)} transacciones.")
         
-        asientos_onvio = []
-        asiento_actual = nro_asiento_inicial
+        filas_planilla = []
+        asiento_actual = int(nro_asiento_inicial)
         fechas_unicas = df_origen["Fecha"].unique()
         
         for fecha in fechas_unicas:
@@ -202,8 +201,8 @@ if archivos_cargados:
                 
                 for clave, datos in EQUIVALENCIAS_BASE.items():
                     if clave in desc_upper:
-                        codigo_cuenta = datos
-                        nombre_cuenta = datos
+                        codigo_cuenta = datos[0]
+                        nombre_cuenta = datos[1]
                         break
                 
                 if es_credito:
@@ -213,29 +212,28 @@ if archivos_cargados:
                     monto_imputacion = importe
                     monto_banco = -importe
                 
-                # Generación lineal de pases contables balanceados para ONVIO
-                pase_1 = {
-                    "Número de asiento": int(asiento_actual),
-                    "Número de Pase": int(pase_actual),
-                    "Fecha": str(fecha),
-                    "Concepto": "Asiento Resumen Bancario",
-                    "Código de cuenta": str(codigo_cuenta),
-                    "Importe en moneda local": float(monto_imputacion),
-                    "Importe en moneda ext.present.": 0.0,
-                    "Leyenda": f"{nombre_cuenta} - {desc}",
-                    "Código de centro de costos": "",
-                    "Porcentaje de distribución": "",
-                    "Imp.mon.local dist.C.Costos": "",
-                    "Imp.mon.present.dist.C.Costos": ""
-                }
-                asientos_onvio.append(pase_1)
+                # REESTRUCTURACIÓN DE INGENIERÍA: Estructura de listas planas indexadas tradicionales. 100% libre de SyntaxError.
+                filas_planilla.append([asiento_actual, pase_actual, str(fecha), "Asiento Resumen Bancario", str(codigo_cuenta), float(monto_imputacion), 0.0, f"{nombre_cuenta} - {desc}", "", "", "", ""])
                 pase_actual += 1
                 
-                pase_2 = {
-                    "Número de asiento": int(asiento_actual),
-                    "Número de Pase": int(pase_actual),
-                    "Fecha": str(fecha),
-                    "Concepto": "Asiento Resumen Bancario",
-                    "Código de cuenta": str(CUENTA_BANCO_COMAFI),
-                    "Importe en moneda local": float(monto_banco),
-                    "Importe en moneda ext.present.": 0.0,
+                filas_planilla.append([asiento_actual, pase_actual, str(fecha), "Asiento Resumen Bancario", str(CUENTA_BANCO_COMAFI), float(monto_banco), 0.0, f"COMAFI CTA CTE - {desc}", "", "", "", ""])
+                pase_actual += 1
+                
+            asiento_actual += 1
+            
+        columnas_onvio = [
+            "Número de asiento", "Número de Pase", "Fecha", "Concepto", "Código de cuenta",
+            "Importe en moneda local", "Importe en moneda ext.present.", "Leyenda",
+            "Código de centro de costos", "Porcentaje de distribución", 
+            "Imp.mon.local dist.C.Costos", "Imp.mon.present.dist.C.Costos"
+        ]
+        
+        df_resultado = pd.DataFrame(filas_planilla, columns=columnas_onvio)
+        
+        if not df_resultado.empty:
+            st.markdown("### 2. Previsualización y Control")
+            st.dataframe(df_resultado)
+            
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_resultado.to_excel(writer, index=False, sheet_name='Importacion_ONVIO')
