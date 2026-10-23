@@ -180,6 +180,8 @@ if archivos_cargados:
         df_origen = pd.DataFrame()
 
     if not df_origen.empty:
+        st.success(f"🔥 ¡Éxito! Se procesaron {len(archivos_cargados)} archivos sueltos y se extrajeron {len(df_origen)} transacciones reales.")
+        
         filas_planilla = []
         asiento_actual = int(nro_asiento_inicial)
         fechas_unicas = df_origen["Fecha"].unique()
@@ -228,13 +230,10 @@ if archivos_cargados:
         df_resultado = pd.DataFrame(filas_planilla, columns=columnas_onvio)
         
         if not df_resultado.empty:
-            # UBICAR EL BOTÓN ARRIBA PARA COMODIDAD DEL USUARIO
-            col1, col2 = st.columns([2, 1])
-            with col1:
-                st.success(f"🔥 ¡Éxito! Se procesaron {len(archivos_cargados)} archivos sueltos y se extrajeron {len(df_origen)} transacciones reales.")
-            with col2:
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    df_resultado.to_excel(writer, index=False, sheet_name='Importacion_ONVIO')
-                excel_data = output.getvalue()
-                
+            st.markdown("### 2. Previsualización y Control")
+            st.dataframe(df_resultado) # La tabla recupera su visualización total y scroll independiente
+            
+            st.markdown("### 3. Exportación Final")
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_resultado.to_excel(writer, index=False, sheet_name='Importacion_ONVIO')
