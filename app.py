@@ -231,8 +231,7 @@ with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df_resultado.to_excel(writer, index=False, sheet_name='Importacion_ONVIO')
             excel_data = output.getvalue()
             
-
-            st.download_button(
+st.download_button(
                 label="📥 Descargar Excel para importar en ONVIO",
                 data=excel_data,
                 file_name=f"Importacion_ONVIO_{pd.Timestamp.today():%Y%m%d}.xlsx",
