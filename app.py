@@ -38,7 +38,7 @@ if not st.session_state["autenticado"]:
 st.title("🤖 Sistema de Automatización Contable")
 st.subheader("Asociaciones Civiles - Motor de Importación Directa para 'ONVIO'")
 
-# CUENTAS CONTABLES FIJAS
+# CUENTAS CONTABLES FIJAS (Plan de Cuentas Real Extraído)
 CUENTA_BANCO_COMAFI = "11016010"  # CTA/CTE $ COMAFI 1070-01085-6
 CUENTA_PUENTE_DEF = "13000000"
 
@@ -94,9 +94,11 @@ def procesar_lineas_comafi(text):
     for linea in lineas:
         linea_upper = linea.upper()
         
+        # Filtro de exclusión radical de transportes de saldo y leyendas fijas de pie de página
         if any(keyword in linea_upper for keyword in ["TRANSPORTE", "GARANTIA DE HASTA", "LEY 24.485", "DECRETO 540/95", "CIRCULAR OPASI"]):
             continue 
             
+        # Detectar el final de la lectura del extracto real
         if "SALDO AL:" in linea_upper or "IMPUESTOS DEBITADOS" in linea_upper or "BASE IMPONIBLE" in linea_upper:
             freno_activado = True
             
@@ -107,14 +109,15 @@ def procesar_lineas_comafi(text):
         if len(partes) == 0:
             continue
             
-        primer_elemento = str(partes[0])
+        # Extracción segura basada de forma estricta en el texto plano de la primera posición del vector
+        primer_token = str(partes[0])
         es_una_fecha = False
         
-        if len(primer_elemento) == 8 and ("/" in primer_elemento or "-" in primer_elemento):
+        if len(primer_token) == 8 and ("/" in primer_token or "-" in primer_token):
             es_una_fecha = True
         
         if es_una_fecha:
-            fecha_en_memoria = primer_elemento
+            fecha_en_memoria = primer_token
             if "Saldo Anterior" in linea:
                 continue
             concepto_acumulado = " ".join([x for x in partes[1:] if not re.match(r'^\d{6,12}$', x) and "," not in x])
@@ -201,6 +204,7 @@ if archivos_cargados:
                 
                 for clave, datos in EQUIVALENCIAS_BASE.items():
                     if clave in desc_upper:
+                        # EXTRACCIÓN SEPARADA: Aislar estrictamente el elemento numérico para erradicar las tuplas residuales
                         codigo_cuenta = str(datos[0])
                         nombre_cuenta = str(datos[1])
                         break
@@ -230,10 +234,3 @@ if archivos_cargados:
         df_resultado = pd.DataFrame(filas_planilla, columns=columnas_onvio)
         
         if not df_resultado.empty:
-            # 1. BOTÓN DE EXPORTACIÓN (Se dibuja antes que la tabla pesada para asegurar disponibilidad)
-            st.markdown("### 3. Exportación Final")
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df_resultado.to_excel(writer, index=False, sheet_name='Importacion_ONVIO')
-            excel_data = output.getvalue()
-            
