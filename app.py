@@ -83,6 +83,85 @@ if st.sidebar.button("🔒 Cerrar Sesión"):
 st.markdown("### 1. Cargar Extractos Bancarios")
 archivos_cargados = st.file_uploader("Arrastrá uno o más PDFs del extracto bancario a la vez", type=["pdf"], accept_multiple_files=True)
 
+def procesar_lineas_comafi(text):
+    movimientos = []
+    lineas = text.split("\n")
+    
+    fecha_en_memoria = None
+    concepto_acumulado = ""
+    freno_activado = False
+    
+    for linea in lineas:
+        linea_upper = linea.upper()
+        
+        if any(keyword in linea_upper for keyword in ["TRANSPORTE", "GARANTIA DE HASTA", "LEY 24.485", "DECRETO 540/95", "CIRCULAR OPASI"]):
+            continue 
+            
+        if "SALDO AL:" in linea_upper or "IMPUESTOS DEBITADOS" in linea_upper or "BASE IMPONIBLE" in linea_upper:
+            freno_activado = True
+            
+        if freno_activado:
+            continue 
+            
+        partes = linea.split()
+        if len(partes) == 0:
+            continue
+            
+        # EXTRACCIÓN CORRECTA DE FECHA: Asegurar que se guarde como string puro de texto
+        primer_token = str(partes[0])
+        tiene_fecha = re.match(r'^\d{2}/\d{2}/\d{2}$', primer_token)
+        
+        if tiene_fecha:
+            fecha_en_memoria = primer_token
+            if "Saldo Anterior" in linea:
+                continue
+            concepto_acumulado = " ".join([x for x in partes[1:] if not re.match(r'^\d{6,12}$', x) and "," not in x])
+        else:
+            if not fecha_en_memoria:
+                continue
+            texto_secundario = " ".join([x for x in partes if not re.match(r'^\d{6,12}$', x) and "," not in x])
+            if texto_secundario:
+                concepto_acumulado += " " + texto_secundario
+
+        importes_validos = []
+        for token in partes:
+            if re.match(r'^\d{6,12}$', token): 
+                continue
+            token_clean = token.replace(".", "").replace(",", ".")
+            if token_clean.endswith("-"):
+                token_clean = "-" + token_clean[:-1]
+            try:
+                if "," in token: 
+                    val = float(token_clean)
+                    importes_validos.append(val)
+            except ValueError:
+                continue
+
+        if not importes_validos:
+            continue  
+            
+        if len(importes_validos) >= 2:
+            importe_real = importes_validos[-2]
+        else:
+            importe_real = importes_validos[-1]
+            
+        desc_final = concepto_acumulado.strip()
+        
+        es_credito = False
+        desc_upper = desc_final.upper()
+        if any(kw in desc_upper for kw in ["RECIBIDA", "CREDITOS", "DEPOSITO", "ACREDITADO", "RECIBID", "TONELLI", "CPS", "OURENSE"]):
+            es_credito = True
+            
+        movimientos.append({
+            "Fecha": str(fecha_en_memoria), # Forzado a texto plano
+            "Descripción": desc_final,
+            "Importe": abs(importe_real),
+            "EsCredito": es_credito
+        })
+        concepto_acumulado = ""
+        
+    return movimientos
+
 if archivos_cargados:
     movimientos_totales = []
     
@@ -91,80 +170,8 @@ if archivos_cargados:
             for page in pdf.pages:
                 text = page.extract_text()
                 if text:
-                    lineas = text.split("\n")
-                    fecha_en_memoria = None
-                    concepto_acumulado = ""
-                    freno_activado = False
-                    
-                    for linea in lineas:
-                        linea_upper = linea.upper()
-                        
-                        if any(keyword in linea_upper for keyword in ["TRANSPORTE", "GARANTIA DE HASTA", "LEY 24.485", "DECRETO 540/95", "CIRCULAR OPASI"]):
-                            continue 
-                            
-                        if "SALDO AL:" in linea_upper or "IMPUESTOS DEBITADOS" in linea_upper or "BASE IMPONIBLE" in linea_upper:
-                            freno_activado = True
-                            
-                        if freno_activado:
-                            continue 
-                            
-                        partes = linea.split()
-                        if len(partes) == 0:
-                            continue
-                            
-                        # VERIFICACIÓN GANADORA RECUPERADA: Lectura exacta y prolija del primer token de texto
-                        primer_token = partes[0]
-                        tiene_fecha = re.match(r'^\d{2}/\d{2}/\d{2}$', primer_token)
-                        
-                        if tiene_fecha:
-                            fecha_en_memoria = primer_token
-                            if "Saldo Anterior" in linea:
-                                continue
-                            concepto_acumulado = " ".join([x for x in partes[1:] if not re.match(r'^\d{6,12}$', x) and "," not in x])
-                        else:
-                            if not fecha_en_memoria:
-                                continue
-                            texto_secundario = " ".join([x for x in partes if not re.match(r'^\d{6,12}$', x) and "," not in x])
-                            if texto_secundario:
-                                concepto_acumulado += " " + texto_secundario
-
-                        importes_validos = []
-                        for token in partes:
-                            if re.match(r'^\d{6,12}$', token): 
-                                continue
-                            token_clean = token.replace(".", "").replace(",", ".")
-                            if token_clean.endswith("-"):
-                                token_clean = "-" + token_clean[:-1]
-                            try:
-                                if "," in token: 
-                                    val = float(token_clean)
-                                    importes_validos.append(val)
-                            except ValueError:
-                                continue
-
-                        if not importes_validos:
-                            continue  
-                            
-                        if len(importes_validos) >= 2:
-                            importe_real = importes_validos[-2]
-                        else:
-                            importe_real = importes_validos[-1]
-                            
-                        desc_final = concepto_acumulado.strip()
-                        
-                        es_credito = False
-                        desc_upper = desc_final.upper()
-                        if any(kw in desc_upper for kw in ["RECIBIDA", "CREDITOS", "DEPOSITO", "ACREDITADO", "RECIBID", "TONELLI", "CPS", "OURENSE"]):
-                            es_credito = True
-                            
-                        movimientos_totales.append({
-                            "Fecha": fecha_en_memoria,
-                            "Descripción": desc_final,
-                            "Importe": abs(importe_real),
-                            "EsCredito": es_credito
-                        })
-                        concepto_acumulado = ""
-
+                    movimientos_totales.extend(procesar_lineas_comafi(text))
+                
     if movimientos_totales:
         df_origen = pd.DataFrame(movimientos_totales)
         st.success(f"🔥 ¡Éxito! Se procesaron {len(archivos_cargados)} archivos sueltos y se extrajeron {len(df_origen)} transacciones reales.")
@@ -174,7 +181,7 @@ if archivos_cargados:
         fechas_unicas = df_origen["Fecha"].unique()
         
         for fecha in fechas_unicas:
-            df_dia = df_origen[df_origen["Fecha"] == fecha]
+            df_dia = df_origen[df_origen["Fecha"] == str(fecha)]
             pase_actual = 1
             
             for idx, fila in df_dia.iterrows():
@@ -188,7 +195,6 @@ if archivos_cargados:
                 
                 for clave, datos in EQUIVALENCIAS_BASE.items():
                     if clave in desc_upper:
-                        # BLINDAJE DE EXTRACCIÓN: Separar el número de cuenta sin tuplas residuales
                         codigo_cuenta = str(datos[0])
                         nombre_cuenta = str(datos[1])
                         break
@@ -200,7 +206,30 @@ if archivos_cargados:
                     monto_imputacion = float(importe)
                     monto_banco = -importe
                 
-                filas_planilla.append([asiento_actual, pase_actual, str(fecha), "Asiento Resumen Bancario", str(codigo_cuenta), float(monto_imputacion), 0.0, f"{nombre_cuenta} - {desc}", "", "", "", ""])
+                filas_planilla.append([int(asiento_actual), int(pase_actual), str(fecha), "Asiento Resumen Bancario", str(codigo_cuenta), float(monto_imputacion), 0.0, f"{nombre_cuenta} - {desc}", "", "", "", ""])
                 pase_actual += 1
                 
-                filas_planilla.append([asiento_actual, pase_actual, str(fecha), "Asiento Resumen Bancario", str(CUENTA_BANCO_COMAFI), float(monto_banco), 0.0, f"COMAFI CTA CTE - {desc}", "", "", "", ""])
+                filas_planilla.append([int(asiento_actual), int(pase_actual), str(fecha), "Asiento Resumen Bancario", str(CUENTA_BANCO_COMAFI), float(monto_banco), 0.0, f"COMAFI CTA CTE - {desc}", "", "", "", ""])
+                pase_actual += 1
+                
+            asiento_actual += 1
+            
+        columnas_onvio = [
+            "Número de asiento", "Número de Pase", "Fecha", "Concepto", "Código de cuenta",
+            "Importe en moneda local", "Importe en moneda ext.present.", "Leyenda",
+            "Código de centro de costos", "Porcentaje de distribución", 
+            "Imp.mon.local dist.C.Costos", "Imp.mon.present.dist.C.Costos"
+        ]
+        
+        df_resultado = pd.DataFrame(filas_planilla, columns=columnas_onvio)
+        
+        if not df_resultado.empty:
+            st.markdown("### 2. Previsualización y Control")
+            st.dataframe(df_resultado)
+            
+            st.markdown("### 3. Exportación Final")
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_resultado.to_excel(writer, index=False, sheet_name='Importacion_ONVIO')
+            excel_data = output.getvalue()
+            
