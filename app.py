@@ -89,7 +89,7 @@ def procesar_lineas_comafi(text):
     
     fecha_en_memoria = None
     concepto_acumulado = ""
-    freno_activado = False # Se inicia limpio para cada bloque de texto
+    freno_activado = False
     
     for linea in lineas:
         linea_upper = linea.upper()
@@ -107,7 +107,7 @@ def procesar_lineas_comafi(text):
         if len(partes) == 0:
             continue
             
-        primer_elemento = partes[0]
+        primer_elemento = partes
         tiene_fecha = re.match(r'^\d{2}/\d{2}/\d{2}$', primer_elemento)
         
         if tiene_fecha:
@@ -169,7 +169,6 @@ if archivos_cargados:
             for page in pdf.pages:
                 text = page.extract_text()
                 if text:
-                    # El truco contable está acá: procesar líneas de cada archivo de forma limpia
                     movimientos_totales.extend(procesar_lineas_comafi(text))
                 
     df_origen = pd.DataFrame(movimientos_totales)
@@ -237,3 +236,7 @@ if archivos_cargados:
                     "Código de centro de costos": "",
                     "Porcentaje de distribución": "",
                     "Imp.mon.local dist.C.Costos": "",
+                    "Imp.mon.present.dist.C.Costos": ""
+                })
+                pase_actual += 1
+                
