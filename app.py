@@ -54,8 +54,17 @@ def procesar_lineas_comafi(text):
     
     fecha_en_memoria = None
     concepto_acumulado = ""
+    freno_activado = False
     
     for linea in lineas:
+        # DETECTAR FIN DEL EXTRACTO REAL PARA ACTIVAR EL FRENO DE MANO
+        linea_upper = linea.upper()
+        if "SALDO AL:" in linea_upper or "IMPUESTOS DEBITADOS" in linea_upper or "BASE IMPONIBLE" in linea_upper:
+            freno_activado = True
+            
+        if freno_activado:
+            continue # Ignora por completo cualquier línea posterior al saldo final del período
+            
         partes = linea.split()
         if len(partes) == 0:
             continue
@@ -65,15 +74,12 @@ def procesar_lineas_comafi(text):
         
         if tiene_fecha:
             fecha_en_memoria = partes[0]
-            # Si es una línea de "Saldo Anterior" o "Transporte", la salteamos
             if "Saldo Anterior" in linea or "Transporte" in linea:
                 continue
             concepto_acumulado = " ".join([x for x in partes[1:] if not re.match(r'^\d{6,12}$', x) and "," not in x])
         else:
-            # Si no tiene fecha y no tenemos ninguna fecha en memoria previa, ignoramos la basura del encabezado
             if not fecha_en_memoria:
                 continue
-            # Acumular texto descriptivo secundario (ej: nombres de clientes en renglón de abajo)
             texto_secundario = " ".join([x for x in partes if not re.match(r'^\d{6,12}$', x) and "," not in x])
             if texto_secundario:
                 concepto_acumulado += " " + texto_secundario
@@ -94,11 +100,8 @@ def procesar_lineas_comafi(text):
                 continue
 
         if not importes_validos:
-            continue  # Si esta línea no traía importes financieros, seguimos acumulando texto en la próxima vuelta
+            continue  
             
-        # En Comafi, el último valor es el Saldo si la línea lo incluye. 
-        # Si la línea tiene 2 o más importes (monto + saldo), tomamos el anteúltimo.
-        # Si tiene 1 solo importe (porque es un renglón descolgado de crédito sin saldo al lado), ese es el importe real.
         if len(importes_validos) >= 2:
             importe_real = importes_validos[-2]
         else:
@@ -106,7 +109,7 @@ def procesar_lineas_comafi(text):
             
         desc_final = concepto_acumulado.strip()
         
-        # Determinar si es crédito de manera inteligente
+        # Determinar si es crédito
         es_credito = False
         desc_upper = desc_final.upper()
         if any(kw in desc_upper for kw in ["RECIBIDA", "CREDITOS", "DEPOSITO", "ACREDITADO", "RECIBID", "TONELLI", "CPS"]):
@@ -119,7 +122,6 @@ def procesar_lineas_comafi(text):
             "EsCredito": es_credito
         })
         
-        # Resetear concepto acumulado para la siguiente transacción
         concepto_acumulado = ""
         
     return movimientos
@@ -135,7 +137,7 @@ if archivo_cargado is not None:
     df_origen = pd.DataFrame(movimientos_limpios)
 
     if not df_origen.empty:
-        st.success(f"Se extrajeron correctamente {len(df_origen)} transacciones respetando el orden del extracto.")
+        st.success(f"Se extrajeron correctamente {len(df_origen)} transacciones respetando el límite final del extracto.")
         
         asientos_onvio = []
         asiento_actual = nro_asiento_inicial
