@@ -180,8 +180,6 @@ if archivos_cargados:
         df_origen = pd.DataFrame()
 
     if not df_origen.empty:
-        st.success(f"🔥 ¡Éxito! Se procesaron {len(archivos_cargados)} archivos sueltos y se extrajeron {len(df_origen)} transacciones.")
-        
         filas_planilla = []
         asiento_actual = int(nro_asiento_inicial)
         fechas_unicas = df_origen["Fecha"].unique()
@@ -201,8 +199,8 @@ if archivos_cargados:
                 
                 for clave, datos in EQUIVALENCIAS_BASE.items():
                     if clave in desc_upper:
-                        codigo_cuenta = datos[0]
-                        nombre_cuenta = datos[1]
+                        codigo_cuenta = datos
+                        nombre_cuenta = datos
                         break
                 
                 if es_credito:
@@ -212,7 +210,6 @@ if archivos_cargados:
                     monto_imputacion = importe
                     monto_banco = -importe
                 
-                # REESTRUCTURACIÓN DE INGENIERÍA: Estructura de listas planas indexadas tradicionales. 100% libre de SyntaxError.
                 filas_planilla.append([asiento_actual, pase_actual, str(fecha), "Asiento Resumen Bancario", str(codigo_cuenta), float(monto_imputacion), 0.0, f"{nombre_cuenta} - {desc}", "", "", "", ""])
                 pase_actual += 1
                 
@@ -231,9 +228,13 @@ if archivos_cargados:
         df_resultado = pd.DataFrame(filas_planilla, columns=columnas_onvio)
         
         if not df_resultado.empty:
-            st.markdown("### 2. Previsualización y Control")
-            st.dataframe(df_resultado)
-            
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df_resultado.to_excel(writer, index=False, sheet_name='Importacion_ONVIO')
+            # UBICAR EL BOTÓN ARRIBA PARA COMODIDAD DEL USUARIO
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                st.success(f"🔥 ¡Éxito! Se procesaron {len(archivos_cargados)} archivos sueltos y se extrajeron {len(df_origen)} transacciones reales.")
+            with col2:
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df_resultado.to_excel(writer, index=False, sheet_name='Importacion_ONVIO')
+                excel_data = output.getvalue()
+                
