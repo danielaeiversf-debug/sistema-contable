@@ -61,7 +61,7 @@ def procesar_lineas_comafi(text):
         
         # 1. FILTRO DE EXCLUSIÓN PARA RESÚMENES DE PIE DE PÁGINA Y TRANSPORTES FANTASMAS
         if any(keyword in linea_upper for keyword in ["TRANSPORTE", "GARANTIA DE HASTA", "LEY 24.485", "DECRETO 540/95", "CIRCULAR OPASI"]):
-            continue # Saltea la línea de inmediato para que no duplique saldos ni leyes
+            continue 
             
         # 2. DETECTAR EL RESUMEN TOTAL MENSUAL AFIP PARA CORTAR LA LECTURA
         if "SALDO AL:" in linea_upper or "IMPUESTOS DEBITADOS" in linea_upper or "BASE IMPONIBLE" in linea_upper:
@@ -74,11 +74,11 @@ def procesar_lineas_comafi(text):
         if len(partes) == 0:
             continue
             
-        # Comprobar si la línea arranca con una fecha válida (DD/MM/YY)
-        tiene_fecha = re.match(r'^\d{2}/\d{2}/\d{2}$', partes)
+        # CORRECCIÓN: Comprobar si la primera palabra de la línea es una fecha válida (DD/MM/YY)
+        tiene_fecha = re.match(r'^\d{2}/\d{2}/\d{2}$', partes[0])
         
         if tiene_fecha:
-            fecha_en_memoria = partes
+            fecha_en_memoria = partes[0]
             if "Saldo Anterior" in linea:
                 continue
             concepto_acumulado = " ".join([x for x in partes[1:] if not re.match(r'^\d{6,12}$', x) and "," not in x])
@@ -107,7 +107,6 @@ def procesar_lineas_comafi(text):
         if not importes_validos:
             continue  
             
-        # Discriminación inteligente de Saldo acumulado diario
         if len(importes_validos) >= 2:
             importe_real = importes_validos[-2]
         else:
@@ -164,8 +163,8 @@ if archivo_cargado is not None:
                 
                 for clave, datos in EQUIVALENCIAS_BASE.items():
                     if clave in desc_upper:
-                        codigo_cuenta = datos
-                        nombre_cuenta = datos
+                        codigo_cuenta = datos[0]
+                        nombre_cuenta = datos[1]
                         break
                 
                 if es_credito:
