@@ -107,7 +107,8 @@ def procesar_lineas_comafi(text):
         if len(partes) == 0:
             continue
             
-        primer_elemento = partes
+        # CORRECCIÓN DE SEGURIDAD CONTRA TYPEERROR: Convertir explícitamente a string antes del re.match
+        primer_elemento = str(partes[0])
         tiene_fecha = re.match(r'^\d{2}/\d{2}/\d{2}$', primer_elemento)
         
         if tiene_fecha:
@@ -171,7 +172,10 @@ if archivos_cargados:
                 if text:
                     movimientos_totales.extend(procesar_lineas_comafi(text))
                 
-    df_origen = pd.DataFrame(movimientos_totales)
+    if movimientos_totales:
+        df_origen = pd.DataFrame(movimientos_totales)
+    else:
+        df_origen = pd.DataFrame()
 
     if not df_origen.empty:
         st.success(f"🔥 ¡Éxito! Se procesaron {len(archivos_cargados)} archivos sueltos y se extrajeron {len(df_origen)} transacciones.")
@@ -206,7 +210,6 @@ if archivos_cargados:
                     monto_imputacion = importe
                     monto_banco = -importe
                 
-                # Pase 1: Cuenta Destino Imputada
                 asientos_onvio.append({
                     "Número de asiento": asiento_actual,
                     "Número de Pase": pase_actual,
@@ -223,7 +226,6 @@ if archivos_cargados:
                 })
                 pase_actual += 1
                 
-                # Pase 2: Contrapartida de Banco Comafi
                 asientos_onvio.append({
                     "Número de asiento": asiento_actual,
                     "Número de Pase": pase_actual,
@@ -237,6 +239,3 @@ if archivos_cargados:
                     "Porcentaje de distribución": "",
                     "Imp.mon.local dist.C.Costos": "",
                     "Imp.mon.present.dist.C.Costos": ""
-                })
-                pase_actual += 1
-                
