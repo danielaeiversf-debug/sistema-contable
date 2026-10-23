@@ -13,18 +13,27 @@ st.subheader("Asociaciones Civiles - Motor de Importación Directa para 'ONVIO'"
 CUENTA_BANCO_COMAFI = "11016010"  # CTA/CTE $ COMAFI 1070-01085-6
 CUENTA_PUENTE_DEF = "13000000"
 
-# 2. MAPEO DE EQUIVALENCIAS CONTABLES
+# 2. MAPEO FLEXIBILIZADO CON PALABRAS CLAVE UNIVERSALES (Evita desvíos a Cuenta Puente)
 EQUIVALENCIAS_BASE = {
     "MANTENIMIENTO DE": ("53010000", "GASTOS BANCARIOS"),
     "COMISION EMISION": ("53010000", "GASTOS BANCARIOS"),
     "COMISION TRANSFERENCIAS": ("53010000", "GASTOS BANCARIOS"),
     "COMISION": ("53010000", "GASTOS BANCARIOS"),
-    "PAGO DE CHEQUE POR CAJA": ("21012010", "PROVEEDORES"),
-    "PAGO DE CHEQUE 48 HS": ("21012010", "PROVEEDORES"),
-    "PAGO DE SERVICIOS POR PAGO DIR": ("21012010", "PROVEEDORES"),
-    "DEPOSITO DE CHEQUES 48 HS": ("21012010", "PROVEEDORES"),
-    "DEPOSITO DE EFECTIVO": ("11011000", "CAJA"),
-    "DEPOSITO EN CAJERO AUTOMATICO": ("11011000", "CAJA"),
+    
+    # PROVEEDORES: Agrupa transferencias e-banking, pagos directos, pagos electrónicos de servicios y cheques
+    "PAGO ELECTRONICO": ("21012010", "PROVEEDORES"),
+    "PAGO DE SERVICIOS": ("21012010", "PROVEEDORES"),
+    "PAGO DE CHEQUE": ("21012010", "PROVEEDORES"),
+    "EBANKIN": ("21012010", "PROVEEDORES"),
+    "PROV": ("21012010", "PROVEEDORES"),
+    
+    # DEUDORES POR SERVICIOS: Captura cualquier variante de transferencia recibida, inmediata, CVU o depósitos identificados por DATAN
+    "RECIBIDA": ("11031010", "DEUDORES POR SERVICIOS"),
+    "RECIBID": ("11031010", "DEUDORES POR SERVICIOS"),
+    "DATAN": ("11031010", "DEUDORES POR SERVICIOS"),
+    "DEPOSITO": ("11011000", "CAJA"),
+    
+    # IMPUESTOS
     "DEBITOS - TASA": ("53070000", "IMPUESTO DEB LEY 25413"),
     "DEBITOS ART 45": ("53070000", "IMPUESTO DEB LEY 25413"),
     "DEB LEY 25413": ("53070000", "IMPUESTO DEB LEY 25413"),
@@ -33,10 +42,9 @@ EQUIVALENCIAS_BASE = {
     "CRED LEY 25413": ("53080000", "IMPUESTO CRED LEY 25413"),
     "IMPUESTO A LOS CREDITOS": ("53080000", "IMPUESTO CRED LEY 25413"),
     "IVA - ALICUOTA": ("11032050", "DGI IVA RET. Y PERCEPCIONES"),
+    
+    # OTROS
     "SUELDOS": ("21013010", "SUELDOS Y JORNALES A PAGAR"),
-    "TRANSFERENCIA TERCEROS EBANKIN": ("21012010", "PROVEEDORES"),
-    "TRANSF. INMEDIATA RECIBIDA": ("11031010", "DEUDORES POR SERVICIOS"),
-    "TRANSFERENCIA TERCEROS RECIBID": ("11031010", "DEUDORES POR SERVICIOS"),
     "HONORARIOS": ("52020000", "HONORARIOS PROFESIONALES"),
 }
 
@@ -59,11 +67,11 @@ def procesar_lineas_comafi(text):
     for linea in lineas:
         linea_upper = linea.upper()
         
-        # 1. FILTRO DE EXCLUSIÓN PARA RESÚMENES DE PIE DE PÁGINA Y TRANSPORTES FANTASMAS
+        # Filtro de exclusión de transporte y textos legales fijados al pie de página
         if any(keyword in linea_upper for keyword in ["TRANSPORTE", "GARANTIA DE HASTA", "LEY 24.485", "DECRETO 540/95", "CIRCULAR OPASI"]):
             continue 
             
-        # 2. DETECTAR EL RESUMEN TOTAL MENSUAL AFIP PARA CORTAR LA LECTURA
+        # Detectar el final del extracto contable real
         if "SALDO AL:" in linea_upper or "IMPUESTOS DEBITADOS" in linea_upper or "BASE IMPONIBLE" in linea_upper:
             freno_activado = True
             
@@ -74,11 +82,9 @@ def procesar_lineas_comafi(text):
         if len(partes) == 0:
             continue
             
-        # CORRECCIÓN: Comprobar si la primera palabra de la línea es una fecha válida (DD/MM/YY)
-        tiene_fecha = re.match(r'^\d{2}/\d{2}/\d{2}$', partes[0])
-        
-        if tiene_fecha:
-            fecha_en_memoria = partes[0]
+        # Validar si el primer elemento es una fecha (DD/MM/YY)
+        if re.match(r'^\d{2}/\d{2}/\d{2}$', partes):
+            fecha_en_memoria = partes
             if "Saldo Anterior" in linea:
                 continue
             concepto_acumulado = " ".join([x for x in partes[1:] if not re.match(r'^\d{6,12}$', x) and "," not in x])
@@ -89,7 +95,7 @@ def procesar_lineas_comafi(text):
             if texto_secundario:
                 concepto_acumulado += " " + texto_secundario
 
-        # Buscar importes contables con coma decimal
+        # Buscar importes financieros reales
         importes_validos = []
         for token in partes:
             if re.match(r'^\d{6,12}$', token): 
@@ -114,7 +120,7 @@ def procesar_lineas_comafi(text):
             
         desc_final = concepto_acumulado.strip()
         
-        # Determinar si es crédito
+        # Determinar si es crédito de manera robusta
         es_credito = False
         desc_upper = desc_final.upper()
         if any(kw in desc_upper for kw in ["RECIBIDA", "CREDITOS", "DEPOSITO", "ACREDITADO", "RECIBID", "TONELLI", "CPS"]):
@@ -161,6 +167,7 @@ if archivo_cargado is not None:
                 codigo_cuenta = cuenta_puente
                 nombre_cuenta = "CUENTA PUENTE"
                 
+                # Búsqueda parcial de palabras clave en el diccionario (Contiene)
                 for clave, datos in EQUIVALENCIAS_BASE.items():
                     if clave in desc_upper:
                         codigo_cuenta = datos[0]
