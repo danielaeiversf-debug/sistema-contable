@@ -83,20 +83,25 @@ if st.sidebar.button("🔒 Cerrar Sesión"):
 st.markdown("### 1. Cargar Extractos Bancarios")
 archivos_cargados = st.file_uploader("Arrastrá uno o más PDFs del extracto bancario a la vez", type=["pdf"], accept_multiple_files=True)
 
+# NUEVO: Variables globales del módulo de memoria inter-hojas
+if "fecha_global" not in st.session_state:
+    st.session_state["fecha_global"] = None
+if "concepto_global" not in st.session_state:
+    st.session_state["concepto_global"] = ""
+
 def procesar_lineas_comafi(text):
     movimientos = []
     lineas = text.split("\n")
-    
-    fecha_en_memoria = None
-    concepto_acumulado = ""
     freno_activado = False
     
     for linea in lineas:
         linea_upper = linea.upper()
         
+        # Filtro radical de transportes y pies de página informativos
         if any(keyword in linea_upper for keyword in ["TRANSPORTE", "GARANTIA DE HASTA", "LEY 24.485", "DECRETO 540/95", "CIRCULAR OPASI"]):
             continue 
             
+        # Detectar fin del período real de movimientos
         if "SALDO AL:" in linea_upper or "IMPUESTOS DEBITADOS" in linea_upper or "BASE IMPONIBLE" in linea_upper:
             freno_activado = True
             
@@ -107,22 +112,25 @@ def procesar_lineas_comafi(text):
         if len(partes) == 0:
             continue
             
-        # EXTRACCIÓN CORRECTA DE FECHA: Asegurar que se guarde como string puro de texto
-        primer_token = str(partes[0])
-        tiene_fecha = re.match(r'^\d{2}/\d{2}/\d{2}$', primer_token)
+        # Validar si el primer elemento cumple estrictamente con el formato de fecha (DD/MM/YY)
+        primer_item = partes[0]
+        tiene_fecha = re.match(r'^\d{2}/\d{2}/\d{2}$', primer_item)
         
         if tiene_fecha:
-            fecha_en_memoria = primer_token
+            st.session_state["fecha_global"] = str(primer_item)
             if "Saldo Anterior" in linea:
                 continue
-            concepto_acumulado = " ".join([x for x in partes[1:] if not re.match(r'^\d{6,12}$', x) and "," not in x])
+            # Guardar el concepto inicial ignorando referencias numéricas largas
+            st.session_state["concepto_global"] = " ".join([x for x in partes[1:] if not re.match(r'^\d{6,12}$', x) and "," not in x])
         else:
-            if not fecha_en_memoria:
+            if not st.session_state["fecha_global"]:
                 continue
+            # Acumular textos contiguos (comportamiento multilinea del Comafi)
             texto_secundario = " ".join([x for x in partes if not re.match(r'^\d{6,12}$', x) and "," not in x])
             if texto_secundario:
-                concepto_acumulado += " " + texto_secundario
+                st.session_state["concepto_global"] += " " + texto_secundario
 
+        # Aislar e identificar importes válidos con coma decimal
         importes_validos = []
         for token in partes:
             if re.match(r'^\d{6,12}$', token): 
@@ -145,25 +153,28 @@ def procesar_lineas_comafi(text):
         else:
             importe_real = importes_validos[-1]
             
-        desc_final = concepto_acumulado.strip()
+        desc_final = st.session_state["concepto_global"].strip()
         
         es_credito = False
         desc_upper = desc_final.upper()
-        if any(kw in desc_upper for kw in ["RECIBIDA", "CREDITOS", "DEPOSITO", "ACREDITADO", "RECIBID", "TONELLI", "CPS", "OURENSE"]):
+        if any(kw in desc_upper for kw in ["RECIBIDA", "CREDITOS", "DEPOSITO", "ACREDITADO", "RECIBID", "TONELLI", "CPS", "OURENSE", "TRANSPORTES"]):
             es_credito = True
             
         movimientos.append({
-            "Fecha": str(fecha_en_memoria), # Forzado a texto plano
+            "Fecha": str(st.session_state["fecha_global"]),
             "Descripción": desc_final,
             "Importe": abs(importe_real),
             "EsCredito": es_credito
         })
-        concepto_acumulado = ""
+        st.session_state["concepto_global"] = ""
         
     return movimientos
 
 if archivos_cargados:
     movimientos_totales = []
+    # Reset de memoria global al iniciar procesamiento masivo
+    st.session_state["fecha_global"] = None
+    st.session_state["concepto_global"] = ""
     
     for archivo in archivos_cargados:
         with pdfplumber.open(archivo) as pdf:
@@ -174,7 +185,6 @@ if archivos_cargados:
                 
     if movimientos_totales:
         df_origen = pd.DataFrame(movimientos_totales)
-        st.success(f"🔥 ¡Éxito! Se procesaron {len(archivos_cargados)} archivos sueltos y se extrajeron {len(df_origen)} transacciones reales.")
         
         filas_planilla = []
         asiento_actual = int(nro_asiento_inicial)
@@ -206,10 +216,12 @@ if archivos_cargados:
                     monto_imputacion = float(importe)
                     monto_banco = -importe
                 
-                filas_planilla.append([int(asiento_actual), int(pase_actual), str(fecha), "Asiento Resumen Bancario", str(codigo_cuenta), float(monto_imputacion), 0.0, f"{nombre_cuenta} - {desc}", "", "", "", ""])
+                # Fila 1: Imputación destino del plan
+                filas_planilla.append([asiento_actual, pase_actual, str(fecha), "Asiento Resumen Bancario", codigo_cuenta, float(monto_imputacion), 0.0, f"{nombre_cuenta} - {desc}", "", "", "", ""])
                 pase_actual += 1
                 
-                filas_planilla.append([int(asiento_actual), int(pase_actual), str(fecha), "Asiento Resumen Bancario", str(CUENTA_BANCO_COMAFI), float(monto_banco), 0.0, f"COMAFI CTA CTE - {desc}", "", "", "", ""])
+                # Fila 2: Banco Comafi
+                filas_planilla.append([asiento_actual, pase_actual, str(fecha), "Asiento Resumen Bancario", str(CUENTA_BANCO_COMAFI), float(monto_banco), 0.0, f"COMAFI CTA CTE - {desc}", "", "", "", ""])
                 pase_actual += 1
                 
             asiento_actual += 1
@@ -217,29 +229,3 @@ if archivos_cargados:
         columnas_onvio = [
             "Número de asiento", "Número de Pase", "Fecha", "Concepto", "Código de cuenta",
             "Importe en moneda local", "Importe en moneda ext.present.", "Leyenda",
-            "Código de centro de costos", "Porcentaje de distribución", 
-            "Imp.mon.local dist.C.Costos", "Imp.mon.present.dist.C.Costos"
-        ]
-        
-        df_resultado = pd.DataFrame(filas_planilla, columns=columnas_onvio)
-        
-        if not df_resultado.empty:
-            st.markdown("### 2. Previsualización y Control")
-            st.dataframe(df_resultado)
-            
-            st.markdown("### 3. Exportación Final")
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df_resultado.to_excel(writer, index=False, sheet_name='Importacion_ONVIO')
-            excel_data = output.getvalue()
-            
-
-            st.download_button(
-                label="📥 Descargar Excel para importar en ONVIO",
-                data=excel_data,
-                file_name=f"Importacion_ONVIO_{pd.Timestamp.today():%Y%m%d}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-            )
-    else:
-        st.warning("⚠️ No se encontraron movimientos en los PDFs cargados.")
