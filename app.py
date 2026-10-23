@@ -233,3 +233,13 @@ if archivos_cargados:
                 df_resultado.to_excel(writer, index=False, sheet_name='Importacion_ONVIO')
             excel_data = output.getvalue()
             
+
+            st.download_button(
+                label="📥 Descargar Excel para importar en ONVIO",
+                data=excel_data,
+                file_name=f"Importacion_ONVIO_{pd.Timestamp.today():%Y%m%d}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+    else:
+        st.warning("⚠️ No se encontraron movimientos en los PDFs cargados.")
