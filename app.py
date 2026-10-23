@@ -107,7 +107,6 @@ def procesar_lineas_comafi(text):
         if len(partes) == 0:
             continue
             
-        # CORRECCIÓN DE SEGURIDAD CONTRA TYPEERROR: Convertir explícitamente a string antes del re.match
         primer_elemento = str(partes[0])
         tiene_fecha = re.match(r'^\d{2}/\d{2}/\d{2}$', primer_elemento)
         
@@ -210,7 +209,8 @@ if archivos_cargados:
                     monto_imputacion = importe
                     monto_banco = -importe
                 
-                asientos_onvio.append({
+                # Formateo estricto del bloque de datos para ONVIO
+                pase_1 = {
                     "Número de asiento": asiento_actual,
                     "Número de Pase": pase_actual,
                     "Fecha": fecha,
@@ -223,10 +223,11 @@ if archivos_cargados:
                     "Porcentaje de distribución": "",
                     "Imp.mon.local dist.C.Costos": "",
                     "Imp.mon.present.dist.C.Costos": ""
-                })
+                }
+                asientos_onvio.append(pase_1)
                 pase_actual += 1
                 
-                asientos_onvio.append({
+                pase_2 = {
                     "Número de asiento": asiento_actual,
                     "Número de Pase": pase_actual,
                     "Fecha": fecha,
@@ -239,3 +240,4 @@ if archivos_cargados:
                     "Porcentaje de distribución": "",
                     "Imp.mon.local dist.C.Costos": "",
                     "Imp.mon.present.dist.C.Costos": ""
+                }
