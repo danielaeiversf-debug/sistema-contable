@@ -196,13 +196,14 @@ if archivos_cargados:
                 es_credito = fila["EsCredito"]
                 
                 desc_upper = desc.upper()
-                codigo_cuenta = cuenta_puente
+                codigo_cuenta = str(cuenta_puente)
                 nombre_cuenta = "CUENTA PUENTE"
                 
                 for clave, datos in EQUIVALENCIAS_BASE.items():
                     if clave in desc_upper:
-                        codigo_cuenta = datos
-                        nombre_cuenta = datos
+                        # CORRECCIÓN DE TUPLA: Separar explícitamente el string numérico del nombre
+                        codigo_cuenta = str(datos[0])
+                        nombre_cuenta = str(datos[1])
                         break
                 
                 if es_credito:
@@ -212,7 +213,7 @@ if archivos_cargados:
                     monto_imputacion = importe
                     monto_banco = -importe
                 
-                filas_planilla.append([asiento_actual, pase_actual, str(fecha), "Asiento Resumen Bancario", str(codigo_cuenta), float(monto_imputacion), 0.0, f"{nombre_cuenta} - {desc}", "", "", "", ""])
+                filas_planilla.append([asiento_actual, pase_actual, str(fecha), "Asiento Resumen Bancario", codigo_cuenta, float(monto_imputacion), 0.0, f"{nombre_cuenta} - {desc}", "", "", "", ""])
                 pase_actual += 1
                 
                 filas_planilla.append([asiento_actual, pase_actual, str(fecha), "Asiento Resumen Bancario", str(CUENTA_BANCO_COMAFI), float(monto_banco), 0.0, f"COMAFI CTA CTE - {desc}", "", "", "", ""])
@@ -231,9 +232,8 @@ if archivos_cargados:
         
         if not df_resultado.empty:
             st.markdown("### 2. Previsualización y Control")
-            st.dataframe(df_resultado) # La tabla recupera su visualización total y scroll independiente
+            st.dataframe(df_resultado) 
             
             st.markdown("### 3. Exportación Final")
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df_resultado.to_excel(writer, index=False, sheet_name='Importacion_ONVIO')
