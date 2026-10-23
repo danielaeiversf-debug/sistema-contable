@@ -7,6 +7,7 @@ import re
 # Configuración visual de Streamlit (Ligada al sector y más corporativa)
 st.set_page_config(page_title="ONVIO Automatizador - Sector Sociedades", layout="wide")
 
+# Cambiar diseño visual y tipografía mediante estilos CSS inyectados
 st.markdown("""
     <style>
     .main { background-color: #f8f9fa; }
@@ -106,15 +107,12 @@ def procesar_lineas_comafi(text):
         if len(partes) == 0:
             continue
             
-        # SOLUCIÓN BLINDADA CONTRA TYPEERROR: Evaluar de forma segura el texto de la primera posición
-        primer_elemento = partes[0]
-        
-        # Validar si cumple con formato de fecha (Largo de 8 caracteres y barras/guiones)
+        primer_elemento = str(partes[0])
         es_una_fecha = False
+        
+        # Validación de formato de fecha seguro de 8 caracteres (DD/MM/YY)
         if len(primer_elemento) == 8 and ("/" in primer_elemento or "-" in primer_elemento):
-            # Comprobación de seguridad extra numérica básica
-            if primer_elemento[0].isdigit() and primer_elemento[1].isdigit():
-                es_una_fecha = True
+            es_una_fecha = True
         
         if es_una_fecha:
             fecha_en_memoria = primer_elemento
@@ -183,7 +181,7 @@ if archivos_cargados:
         df_origen = pd.DataFrame()
 
     if not df_origen.empty:
-        st.success(f"🔥 ¡Éxito! Se procesaron {len(archivos_cargados)} archivos sueltos y se extrajeron {len(df_origen)} transacciones reales.")
+        st.success(f"🔥 ¡Éxito! Se procesaron {len(archivos_cargados)} archivos sueltos y se extrajeron {len(df_origen)} transacciones.")
         
         asientos_onvio = []
         asiento_actual = nro_asiento_inicial
@@ -215,27 +213,29 @@ if archivos_cargados:
                     monto_imputacion = importe
                     monto_banco = -importe
                 
-                # Desglose estructurado de pases limpios
-                asientos_onvio.append({
-                    "Número de asiento": asiento_actual,
-                    "Número de Pase": pase_actual,
-                    "Fecha": fecha,
+                # REESTRUCTURACIÓN LINEAL: Cierre limpio de diccionarios para erradicar SyntaxError de llaves abiertas
+                pase_1 = {
+                    "Número de asiento": int(asiento_actual),
+                    "Número de Pase": int(pase_actual),
+                    "Fecha": str(fecha),
                     "Concepto": "Asiento Resumen Bancario",
                     "Código de cuenta": str(codigo_cuenta),
-                    "Importe en moneda local": monto_imputacion,
+                    "Importe en moneda local": float(monto_imputacion),
                     "Importe en moneda ext.present.": 0.0,
                     "Leyenda": f"{nombre_cuenta} - {desc}",
                     "Código de centro de costos": "",
                     "Porcentaje de distribución": "",
                     "Imp.mon.local dist.C.Costos": "",
                     "Imp.mon.present.dist.C.Costos": ""
-                })
+                }
+                asientos_onvio.append(pase_1)
                 pase_actual += 1
                 
-                asientos_onvio.append({
-                    "Número de asiento": asiento_actual,
-                    "Número de Pase": pase_actual,
-                    "Fecha": fecha,
+                pase_2 = {
+                    "Número de asiento": int(asiento_actual),
+                    "Número de Pase": int(pase_actual),
+                    "Fecha": str(fecha),
                     "Concepto": "Asiento Resumen Bancario",
                     "Código de cuenta": str(CUENTA_BANCO_COMAFI),
-                    "Importe en moneda local": monto_banco,
+                    "Importe en moneda local": float(monto_banco),
+                    "Importe en moneda ext.present.": 0.0,
