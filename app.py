@@ -41,6 +41,7 @@ st.subheader("Asociaciones Civiles - Motor de Importación Directa para 'ONVIO'"
 
 # CUENTAS CONTABLES FIJAS
 CUENTA_BANCO_COMAFI = "11016010"  # CTA/CTE $ COMAFI 1070-01085-6
+NRO_CUENTA_EXTRACTO = "1070-01085-6"  # número de cuenta que figura en el extracto (para la columna Concepto)
 CUENTA_PUENTE_DEF = "13000000"
 
 # Las claves se comparan SIN acentos, puntos ni guiones ("Débitos" = "DEBITOS", "Caj.Aut." = "CAJ AUT").
@@ -294,6 +295,10 @@ if archivos_cargados:
             df_dia = df_origen[df_origen["Fecha"] == str(fecha)]
             pase_actual = 1
             
+            # Concepto: BCO COMAFI CTA CTE $ 1070-01085-6 MES MM/AAAA (según la fecha del asiento)
+            _d, _m, _a = str(fecha).split("/")
+            concepto_asiento = f"BCO COMAFI CTA CTE $ {NRO_CUENTA_EXTRACTO} MES {_m}/{'20' + _a if len(_a) == 2 else _a}"
+            
             for idx, fila in df_dia.iterrows():
                 desc = fila["Descripción"]
                 importe = fila["Importe"]
@@ -310,10 +315,10 @@ if archivos_cargados:
                     monto_imputacion = float(importe)
                     monto_banco = -importe
                 
-                filas_planilla.append([int(asiento_actual), int(pase_actual), str(fecha), "Asiento Resumen Bancario", str(codigo_cuenta), float(monto_imputacion), 0.0, f"{nombre_cuenta} - {desc}", "", "", "", ""])
+                filas_planilla.append([int(asiento_actual), int(pase_actual), str(fecha), concepto_asiento, str(codigo_cuenta), float(monto_imputacion), 0.0, f"{nombre_cuenta} - {desc}", "", "", "", ""])
                 pase_actual += 1
                 
-                filas_planilla.append([int(asiento_actual), int(pase_actual), str(fecha), "Asiento Resumen Bancario", str(CUENTA_BANCO_COMAFI), float(monto_banco), 0.0, f"COMAFI CTA CTE - {desc}", "", "", "", ""])
+                filas_planilla.append([int(asiento_actual), int(pase_actual), str(fecha), concepto_asiento, str(CUENTA_BANCO_COMAFI), float(monto_banco), 0.0, f"COMAFI CTA CTE - {desc}", "", "", "", ""])
                 pase_actual += 1
                 
             asiento_actual += 1
@@ -343,6 +348,11 @@ if archivos_cargados:
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df_resultado.to_excel(writer, index=False, sheet_name='Importacion_ONVIO')
+                # Encabezados con fondo naranja
+                from openpyxl.styles import PatternFill
+                relleno_naranja = PatternFill(start_color="FFA500", end_color="FFA500", fill_type="solid")
+                for celda in writer.sheets['Importacion_ONVIO'][1]:
+                    celda.fill = relleno_naranja
             excel_data = output.getvalue()
             
             st.download_button(
