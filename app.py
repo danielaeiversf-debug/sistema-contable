@@ -57,24 +57,29 @@ def procesar_lineas_comafi(text):
     freno_activado = False
     
     for linea in lineas:
-        # DETECTAR FIN DEL EXTRACTO REAL PARA ACTIVAR EL FRENO DE MANO
         linea_upper = linea.upper()
+        
+        # 1. FILTRO DE EXCLUSIÓN PARA RESÚMENES DE PIE DE PÁGINA Y TRANSPORTES FANTASMAS
+        if any(keyword in linea_upper for keyword in ["TRANSPORTE", "GARANTIA DE HASTA", "LEY 24.485", "DECRETO 540/95", "CIRCULAR OPASI"]):
+            continue # Saltea la línea de inmediato para que no duplique saldos ni leyes
+            
+        # 2. DETECTAR EL RESUMEN TOTAL MENSUAL AFIP PARA CORTAR LA LECTURA
         if "SALDO AL:" in linea_upper or "IMPUESTOS DEBITADOS" in linea_upper or "BASE IMPONIBLE" in linea_upper:
             freno_activado = True
             
         if freno_activado:
-            continue # Ignora por completo cualquier línea posterior al saldo final del período
+            continue 
             
         partes = linea.split()
         if len(partes) == 0:
             continue
             
         # Comprobar si la línea arranca con una fecha válida (DD/MM/YY)
-        tiene_fecha = re.match(r'^\d{2}/\d{2}/\d{2}$', partes[0])
+        tiene_fecha = re.match(r'^\d{2}/\d{2}/\d{2}$', partes)
         
         if tiene_fecha:
-            fecha_en_memoria = partes[0]
-            if "Saldo Anterior" in linea or "Transporte" in linea:
+            fecha_en_memoria = partes
+            if "Saldo Anterior" in linea:
                 continue
             concepto_acumulado = " ".join([x for x in partes[1:] if not re.match(r'^\d{6,12}$', x) and "," not in x])
         else:
@@ -84,16 +89,16 @@ def procesar_lineas_comafi(text):
             if texto_secundario:
                 concepto_acumulado += " " + texto_secundario
 
-        # Buscar importes contables con coma decimal en la línea actual
+        # Buscar importes contables con coma decimal
         importes_validos = []
         for token in partes:
-            if re.match(r'^\d{6,12}$', token): # Ignorar números de referencia largos
+            if re.match(r'^\d{6,12}$', token): 
                 continue
             token_clean = token.replace(".", "").replace(",", ".")
             if token_clean.endswith("-"):
                 token_clean = "-" + token_clean[:-1]
             try:
-                if "," in token: # Solo procesar formatos con decimales explícitos
+                if "," in token: 
                     val = float(token_clean)
                     importes_validos.append(val)
             except ValueError:
@@ -102,6 +107,7 @@ def procesar_lineas_comafi(text):
         if not importes_validos:
             continue  
             
+        # Discriminación inteligente de Saldo acumulado diario
         if len(importes_validos) >= 2:
             importe_real = importes_validos[-2]
         else:
@@ -137,7 +143,7 @@ if archivo_cargado is not None:
     df_origen = pd.DataFrame(movimientos_limpios)
 
     if not df_origen.empty:
-        st.success(f"Se extrajeron correctamente {len(df_origen)} transacciones respetando el límite final del extracto.")
+        st.success(f"Se extrajeron correctamente {len(df_origen)} transacciones limpias respetando el extracto.")
         
         asientos_onvio = []
         asiento_actual = nro_asiento_inicial
@@ -158,8 +164,8 @@ if archivo_cargado is not None:
                 
                 for clave, datos in EQUIVALENCIAS_BASE.items():
                     if clave in desc_upper:
-                        codigo_cuenta = datos[0]
-                        nombre_cuenta = datos[1]
+                        codigo_cuenta = datos
+                        nombre_cuenta = datos
                         break
                 
                 if es_credito:
