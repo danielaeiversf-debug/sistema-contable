@@ -1,99 +1,3 @@
-import streamlit as st
-import pandas as pd
-import pdfplumber
-import io
-import re
-
-# Configuración visual de Streamlit (Ligada al sector y más corporativa)
-st.set_page_config(page_title="ONVIO Automatizador - Sector Sociedades", layout="wide")
-
-# Cambiar diseño visual y tipografía mediante estilos CSS inyectados
-st.markdown("""
-    <style>
-    .main { background-color: #f8f9fa; }
-    h1 { color: #1e3a8a; font-family: 'Segoe UI', sans-serif; font-weight: 700; }
-    h3 { color: #475569; font-family: 'Segoe UI', sans-serif; }
-    .stButton>button { background-color: #1e3a8a; color: white; border-radius: 6px; font-weight: 600; }
-    .stButton>button:hover { background-color: #2563eb; color: white; }
-    </style>
-    """, unsafe_allow_html=True)
-
-# 1. MÓDULO DE SEGURIDAD INTERNA PARA LAS 6 PERSONAS
-if "autenticado" not in st.session_state:
-    st.session_state["autenticado"] = False
-
-if not st.session_state["autenticado"]:
-    st.title("🔐 Acceso Restringido - Estudio Contable")
-    clave_ingresada = st.text_input("Introduzca la clave de acceso del sector:", type="password")
-    if st.button("Ingresar al Sistema"):
-        if clave_ingresada == "sociedades2026":
-            st.session_state["autenticado"] = True
-            st.rerun()
-        else:
-            st.error("❌ Clave incorrecta. Solicítela al administrador del sector.")
-    st.stop()
-
-# --- A PARTIR DE AQUÍ EL SISTEMA SE DESBLOQUEA ---
-
-st.title("🤖 Sistema de Automatización Contable")
-st.subheader("Asociaciones Civiles - Motor de Importación Directa para 'ONVIO'")
-
-# CUENTAS CONTABLES FIJAS
-CUENTA_BANCO_COMAFI = "11016010"  # CTA/CTE $ COMAFI 1070-01085-6
-CUENTA_PUENTE_DEF = "13000000"
-
-EQUIVALENCIAS_BASE = {
-    "MANTENIMIENTO DE": ("53010000", "GASTOS BANCARIOS"),
-    "COMISION EMISION": ("53010000", "GASTOS BANCARIOS"),
-    "COMISION TRANSFERENCIAS": ("53010000", "GASTOS BANCARIOS"),
-    "COMISION": ("53010000", "GASTOS BANCARIOS"),
-    "PAGO ELECTRONICO": ("21012010", "PROVEEDORES"),
-    "PAGO DE SERVICIOS": ("21012010", "PROVEEDORES"),
-    "PAGO DE CHEQUE": ("21012010", "PROVEEDORES"),
-    "EBANKIN": ("21012010", "PROVEEDORES"),
-    "PROV": ("21012010", "PROVEEDORES"),
-    "RECIBIDA": ("11031010", "DEUDORES POR SERVICIOS"),
-    "RECIBID": ("11031010", "DEUDORES POR SERVICIOS"),
-    "DATAN": ("11031010", "DEUDORES POR SERVICIOS"),
-    "OURENSE": ("11031010", "DEUDORES POR SERVICIOS"),
-    "DEPOSITO": ("11011000", "CAJA"),
-    "DEBITOS - TASA": ("53070000", "IMPUESTO DEB LEY 25413"),
-    "DEBITOS ART 45": ("53070000", "IMPUESTO DEB LEY 25413"),
-    "DEB LEY 25413": ("53070000", "IMPUESTO DEB LEY 25413"),
-    "IMPUESTO A LOS DEBITOS": ("53070000", "IMPUESTO DEB LEY 25413"),
-    "CREDITOS-TASA G": ("53080000", "IMPUESTO CRED LEY 25413"),
-    "CRED LEY 25413": ("53080000", "IMPUESTO CRED LEY 25413"),
-    "IMPUESTO A LOS CREDITOS": ("53080000", "IMPUESTO CRED LEY 25413"),
-    "IVA - ALICUOTA": ("11032050", "DGI IVA RET. Y PERCEPCIONES"),
-    "SUELDOS": ("21013010", "SUELDOS Y JORNALES A PAGAR"),
-    "HONORARIOS": ("52020000", "HONORARIOS PROFESIONALES"),
-}
-
-# Barra lateral parametrizada y con selectores avanzados para la empresa
-st.sidebar.header("⚙️ Configuración del Trabajo")
-banco_seleccionado = st.sidebar.selectbox("Seleccionar Banco", ["Banco Comafi", "Banco Santander (Próximamente)", "MercadoPago (Próximamente)"])
-plan_seleccionado = st.sidebar.selectbox("Plan de Cuentas Empresa", ["Asociación Civil 12 Casas", "S.R.L. Genérico", "S.A. Genérico"])
-nro_asiento_inicial = st.sidebar.number_input("Número de Asiento Inicial", min_value=1, value=1, step=1)
-cuenta_puente = st.sidebar.text_input("Cuenta Puente", value=CUENTA_PUENTE_DEF)
-
-if st.sidebar.button("🔒 Cerrar Sesión"):
-    st.session_state["autenticado"] = False
-    st.rerun()
-
-st.markdown("### 1. Cargar Extractos Bancarios")
-archivos_cargados = st.file_uploader("Arrastrá uno o más PDFs del extracto bancario a la vez", type=["pdf"], accept_multiple_files=True)
-
-MARCA_SALTO_HOJA = "<<<SALTO_DE_HOJA>>>"
-
-# Palabras que indican crédito (ingreso al banco)
-CLAVES_CREDITO = ["RECIBIDA", "CREDITOS", "DEPOSITO", "ACREDITADO", "RECIBID", "TONELLI", "CPS", "OURENSE"]
-# Excepciones: contienen "CREDITOS" pero son DÉBITOS (impuesto Ley 25413 sobre créditos)
-CLAVES_DEBITO_FORZADO = ["IMPUESTO A LOS CREDITOS", "CREDITOS-TASA", "CRED LEY 25413"]
-
-def es_importe(token):
-    """True si el token tiene formato de importe: 1.234,56 / 1,25 / 1.234,56-"""
-    return re.match(r'^-?\d{1,3}(\.\d{3})*,\d{2}-?$', token) is not None
-
 def procesar_lineas_comafi(text):
     movimientos = []
     lineas = text.split("\n")
@@ -102,6 +6,7 @@ def procesar_lineas_comafi(text):
     concepto_acumulado = ""
     freno_activado = False
     en_corte_de_hoja = False  # entre el "Transporte" de una hoja y el primer importe de la siguiente
+    movimiento_pendiente = False  # fecha + descripción sin importe, esperando el monto en la línea/hoja siguiente
     
     for linea in lineas:
         linea_upper = linea.upper()
@@ -109,10 +14,14 @@ def procesar_lineas_comafi(text):
         if len(partes) == 0:
             continue
         
-        # Salto de hoja: se conserva la fecha y la descripción pendientes
+        # Salto de hoja: igual que antes, cada hoja arranca de cero...
         if linea.strip() == MARCA_SALTO_HOJA:
             freno_activado = False
             en_corte_de_hoja = True
+            # ...SALVO que haya quedado un movimiento cortado (fecha al pie, importe en la hoja siguiente)
+            if not movimiento_pendiente:
+                fecha_en_memoria = None
+                concepto_acumulado = ""
             continue
         
         # "Transporte 0,00" solo cuando es la PRIMERA palabra de la línea
@@ -128,6 +37,7 @@ def procesar_lineas_comafi(text):
             freno_activado = True
             
         if freno_activado:
+            movimiento_pendiente = False
             continue 
             
         # EXTRACCIÓN CORRECTA DE FECHA: Asegurar que se guarde como string puro de texto
@@ -140,8 +50,10 @@ def procesar_lineas_comafi(text):
             en_corte_de_hoja = False
             if "Saldo Anterior" in linea:
                 concepto_acumulado = ""
+                movimiento_pendiente = False
                 continue
             concepto_acumulado = " ".join([x for x in partes[1:] if not re.match(r'^\d{6,12}$', x) and "," not in x])
+            movimiento_pendiente = not hay_importe
         else:
             if not fecha_en_memoria:
                 continue
@@ -184,86 +96,6 @@ def procesar_lineas_comafi(text):
             "EsCredito": es_credito
         })
         concepto_acumulado = ""
+        movimiento_pendiente = False
         
     return movimientos
-
-if archivos_cargados:
-    movimientos_totales = []
-    
-    for archivo in archivos_cargados:
-        # Se procesa el PDF completo de una vez (no hoja por hoja) para no perder
-        # movimientos cuya fecha queda al pie de una hoja y el importe en la siguiente
-        with pdfplumber.open(archivo) as pdf:
-            texto_completo = f"\n{MARCA_SALTO_HOJA}\n".join((page.extract_text() or "") for page in pdf.pages)
-        movimientos_totales.extend(procesar_lineas_comafi(texto_completo))
-                
-    if movimientos_totales:
-        df_origen = pd.DataFrame(movimientos_totales)
-        st.success(f"🔥 ¡Éxito! Se procesaron {len(archivos_cargados)} archivos sueltos y se extrajeron {len(df_origen)} transacciones reales.")
-        
-        filas_planilla = []
-        asiento_actual = int(nro_asiento_inicial)
-        fechas_unicas = df_origen["Fecha"].unique()
-        
-        for fecha in fechas_unicas:
-            df_dia = df_origen[df_origen["Fecha"] == str(fecha)]
-            pase_actual = 1
-            
-            for idx, fila in df_dia.iterrows():
-                desc = fila["Descripción"]
-                importe = fila["Importe"]
-                es_credito = fila["EsCredito"]
-                
-                desc_upper = desc.upper()
-                codigo_cuenta = str(cuenta_puente)
-                nombre_cuenta = "CUENTA PUENTE"
-                
-                for clave, datos in EQUIVALENCIAS_BASE.items():
-                    if clave in desc_upper:
-                        codigo_cuenta = str(datos[0])
-                        nombre_cuenta = str(datos[1])
-                        break
-                
-                if es_credito:
-                    monto_imputacion = -importe
-                    monto_banco = float(importe)
-                else:
-                    monto_imputacion = float(importe)
-                    monto_banco = -importe
-                
-                filas_planilla.append([int(asiento_actual), int(pase_actual), str(fecha), "Asiento Resumen Bancario", str(codigo_cuenta), float(monto_imputacion), 0.0, f"{nombre_cuenta} - {desc}", "", "", "", ""])
-                pase_actual += 1
-                
-                filas_planilla.append([int(asiento_actual), int(pase_actual), str(fecha), "Asiento Resumen Bancario", str(CUENTA_BANCO_COMAFI), float(monto_banco), 0.0, f"COMAFI CTA CTE - {desc}", "", "", "", ""])
-                pase_actual += 1
-                
-            asiento_actual += 1
-            
-        columnas_onvio = [
-            "Número de asiento", "Número de Pase", "Fecha", "Concepto", "Código de cuenta",
-            "Importe en moneda local", "Importe en moneda ext.present.", "Leyenda",
-            "Código de centro de costos", "Porcentaje de distribución", 
-            "Imp.mon.local dist.C.Costos", "Imp.mon.present.dist.C.Costos"
-        ]
-        
-        df_resultado = pd.DataFrame(filas_planilla, columns=columnas_onvio)
-        
-        if not df_resultado.empty:
-            st.markdown("### 2. Previsualización y Control")
-            st.dataframe(df_resultado)
-            
-            st.markdown("### 3. Exportación Final")
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df_resultado.to_excel(writer, index=False, sheet_name='Importacion_ONVIO')
-            excel_data = output.getvalue()
-            
-            st.download_button(
-                label="📥 Descargar Excel para importar en ONVIO",
-                data=excel_data,
-                file_name=f"Importacion_ONVIO_{pd.Timestamp.today():%Y%m%d}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-            )
-    else:
-        st.warning("⚠️ No se encontraron movimientos en los PDFs cargados.")
