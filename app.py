@@ -107,7 +107,7 @@ def procesar_lineas_comafi(text):
         if len(partes) == 0:
             continue
             
-        primer_elemento = str(partes[0])
+        primer_elemento = str(partes)
         es_una_fecha = False
         
         if len(primer_elemento) == 8 and ("/" in primer_elemento or "-" in primer_elemento):
@@ -176,66 +176,60 @@ if archivos_cargados:
                 
     if movimientos_totales:
         df_origen = pd.DataFrame(movimientos_totales)
-    else:
-        df_origen = pd.DataFrame()
-
-    if not df_origen.empty:
-        st.success(f"🔥 ¡Éxito! Se procesaron {len(archivos_cargados)} archivos sueltos y se extrajeron {len(df_origen)} transacciones reales.")
         
-        filas_planilla = []
-        asiento_actual = int(nro_asiento_inicial)
-        fechas_unicas = df_origen["Fecha"].unique()
-        
-        for fecha in fechas_unicas:
-            df_dia = df_origen[df_origen["Fecha"] == fecha]
-            pase_actual = 1
+        if not df_origen.empty:
+            st.success(f"🔥 ¡Éxito! Se procesaron {len(archivos_cargados)} archivos sueltos y se extrajeron {len(df_origen)} transacciones reales.")
             
-            for idx, fila in df_dia.iterrows():
-                desc = fila["Descripción"]
-                importe = fila["Importe"]
-                es_credito = fila["EsCredito"]
-                
-                desc_upper = desc.upper()
-                codigo_cuenta = str(cuenta_puente)
-                nombre_cuenta = "CUENTA PUENTE"
-                
-                for clave, datos in EQUIVALENCIAS_BASE.items():
-                    if clave in desc_upper:
-                        codigo_cuenta = str(datos[0])
-                        nombre_cuenta = str(datos[1])
-                        break
-                
-                if es_credito:
-                    monto_imputacion = -importe
-                    monto_banco = importe
-                else:
-                    monto_imputacion = importe
-                    monto_banco = -importe
-                
-                filas_planilla.append([asiento_actual, pase_actual, str(fecha), "Asiento Resumen Bancario", codigo_cuenta, float(monto_imputacion), 0.0, f"{nombre_cuenta} - {desc}", "", "", "", ""])
-                pase_actual += 1
-                
-                filas_planilla.append([asiento_actual, pase_actual, str(fecha), "Asiento Resumen Bancario", str(CUENTA_BANCO_COMAFI), float(monto_banco), 0.0, f"COMAFI CTA CTE - {desc}", "", "", "", ""])
-                pase_actual += 1
-                
-            asiento_actual += 1
+            filas_planilla = []
+            asiento_actual = int(nro_asiento_inicial)
+            fechas_unicas = df_origen["Fecha"].unique()
             
-        columnas_onvio = [
-            "Número de asiento", "Número de Pase", "Fecha", "Concepto", "Código de cuenta",
-            "Importe en moneda local", "Importe en moneda ext.present.", "Leyenda",
-            "Código de centro de costos", "Porcentaje de distribución", 
-            "Imp.mon.local dist.C.Costos", "Imp.mon.present.dist.C.Costos"
-        ]
-        
-        df_resultado = pd.DataFrame(filas_planilla, columns=columnas_onvio)
-        
-        if not df_resultado.empty:
-            st.markdown("### 2. Previsualización y Control")
-            st.dataframe(df_resultado)
+            for fecha in fechas_unicas:
+                df_dia = df_origen[df_origen["Fecha"] == fecha]
+                pase_actual = 1
+                
+                for idx, fila in df_dia.iterrows():
+                    desc = fila["Descripción"]
+                    importe = fila["Importe"]
+                    es_credito = fila["EsCredito"]
+                    
+                    desc_upper = desc.upper()
+                    codigo_cuenta = str(cuenta_puente)
+                    nombre_cuenta = "CUENTA PUENTE"
+                    
+                    for clave, datos in EQUIVALENCIAS_BASE.items():
+                        if clave in desc_upper:
+                            codigo_cuenta = str(datos[0])
+                            nombre_cuenta = str(datos[1])
+                            break
+                    
+                    if es_credito:
+                        monto_imputacion = -importe
+                        monto_banco = float(importe)
+                    else:
+                        monto_imputacion = float(importe)
+                        monto_banco = -importe
+                    
+                    filas_planilla.append([asiento_actual, pase_actual, str(fecha), "Asiento Resumen Bancario", codigo_cuenta, float(monto_imputacion), 0.0, f"{nombre_cuenta} - {desc}", "", "", "", ""])
+                    pase_actual += 1
+                    
+                    filas_planilla.append([asiento_actual, pase_actual, str(fecha), "Asiento Resumen Bancario", str(CUENTA_BANCO_COMAFI), float(monto_banco), 0.0, f"COMAFI CTA CTE - {desc}", "", "", "", ""])
+                    pase_actual += 1
+                    
+                asiento_actual += 1
+                
+            columnas_onvio = [
+                "Número de asiento", "Número de Pase", "Fecha", "Concepto", "Código de cuenta",
+                "Importe en moneda local", "Importe en moneda ext.present.", "Leyenda",
+                "Código de centro de costos", "Porcentaje de distribución", 
+                "Imp.mon.local dist.C.Costos", "Imp.mon.present.dist.C.Costos"
+            ]
             
-            st.markdown("### 3. Exportación Final")
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df_resultado.to_excel(writer, index=False, sheet_name='Importacion_ONVIO')
-            excel_data = output.getvalue()
+            df_resultado = pd.DataFrame(filas_planilla, columns=columnas_onvio)
             
+            if not df_resultado.empty:
+                st.markdown("### 2. Previsualización y Control")
+                st.dataframe(df_resultado)
+                
+                st.markdown("### 3. Exportación Final")
+                output = io.BytesIO()
