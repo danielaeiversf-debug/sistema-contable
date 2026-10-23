@@ -230,9 +230,7 @@ if archivos_cargados:
         df_resultado = pd.DataFrame(filas_planilla, columns=columnas_onvio)
         
         if not df_resultado.empty:
-            st.markdown("### 2. Previsualización y Control")
-            st.dataframe(df_resultado)
-            
+            # 1. BOTÓN DE EXPORTACIÓN (Se dibuja antes que la tabla pesada para asegurar disponibilidad)
             st.markdown("### 3. Exportación Final")
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
