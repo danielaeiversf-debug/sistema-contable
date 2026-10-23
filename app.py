@@ -201,7 +201,6 @@ if archivos_cargados:
                 
                 for clave, datos in EQUIVALENCIAS_BASE.items():
                     if clave in desc_upper:
-                        # CORRECCIÓN DE TUPLA: Separar explícitamente el string numérico del nombre
                         codigo_cuenta = str(datos[0])
                         nombre_cuenta = str(datos[1])
                         break
@@ -232,8 +231,11 @@ if archivos_cargados:
         
         if not df_resultado.empty:
             st.markdown("### 2. Previsualización y Control")
-            st.dataframe(df_resultado) 
+            st.dataframe(df_resultado)
             
             st.markdown("### 3. Exportación Final")
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_resultado.to_excel(writer, index=False, sheet_name='Importacion_ONVIO')
+            excel_data = output.getvalue()
+            
