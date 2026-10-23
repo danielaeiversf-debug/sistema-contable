@@ -7,7 +7,6 @@ import re
 # Configuración visual de Streamlit (Ligada al sector y más corporativa)
 st.set_page_config(page_title="ONVIO Automatizador - Sector Sociedades", layout="wide")
 
-# Cambiar diseño visual y tipografía mediante estilos CSS inyectados
 st.markdown("""
     <style>
     .main { background-color: #f8f9fa; }
@@ -107,10 +106,17 @@ def procesar_lineas_comafi(text):
         if len(partes) == 0:
             continue
             
-        primer_elemento = str(partes[0])
-        tiene_fecha = re.match(r'^\d{2}/\d{2}/\d{2}$', primer_elemento)
+        # SOLUCIÓN BLINDADA CONTRA TYPEERROR: Evaluar de forma segura el texto de la primera posición
+        primer_elemento = partes[0]
         
-        if tiene_fecha:
+        # Validar si cumple con formato de fecha (Largo de 8 caracteres y barras/guiones)
+        es_una_fecha = False
+        if len(primer_elemento) == 8 and ("/" in primer_elemento or "-" in primer_elemento):
+            # Comprobación de seguridad extra numérica básica
+            if primer_elemento[0].isdigit() and primer_elemento[1].isdigit():
+                es_una_fecha = True
+        
+        if es_una_fecha:
             fecha_en_memoria = primer_elemento
             if "Saldo Anterior" in linea:
                 continue
@@ -177,7 +183,7 @@ if archivos_cargados:
         df_origen = pd.DataFrame()
 
     if not df_origen.empty:
-        st.success(f"🔥 ¡Éxito! Se procesaron {len(archivos_cargados)} archivos sueltos y se extrajeron {len(df_origen)} transacciones.")
+        st.success(f"🔥 ¡Éxito! Se procesaron {len(archivos_cargados)} archivos sueltos y se extrajeron {len(df_origen)} transacciones reales.")
         
         asientos_onvio = []
         asiento_actual = nro_asiento_inicial
@@ -198,8 +204,8 @@ if archivos_cargados:
                 
                 for clave, datos in EQUIVALENCIAS_BASE.items():
                     if clave in desc_upper:
-                        codigo_cuenta = datos[0]
-                        nombre_cuenta = datos[1]
+                        codigo_cuenta = datos
+                        nombre_cuenta = datos
                         break
                 
                 if es_credito:
@@ -209,7 +215,7 @@ if archivos_cargados:
                     monto_imputacion = importe
                     monto_banco = -importe
                 
-                # Desglose de pases estructurados limpios
+                # Desglose estructurado de pases limpios
                 asientos_onvio.append({
                     "Número de asiento": asiento_actual,
                     "Número de Pase": pase_actual,
@@ -233,11 +239,3 @@ if archivos_cargados:
                     "Concepto": "Asiento Resumen Bancario",
                     "Código de cuenta": str(CUENTA_BANCO_COMAFI),
                     "Importe en moneda local": monto_banco,
-                    "Importe en moneda ext.present.": 0.0,
-                    "Leyenda": f"COMAFI CTA CTE - {desc}",
-                    "Código de centro de costos": "",
-                    "Porcentaje de distribución": "",
-                    "Imp.mon.local dist.C.Costos": "",
-                    "Imp.mon.present.dist.C.Costos": ""
-                })
-
