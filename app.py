@@ -107,10 +107,10 @@ def procesar_lineas_comafi(text):
         if len(partes) == 0:
             continue
             
+        # CORRECCIÓN DEFINITIVA DE INDEXACIÓN: Extraer el primer token de texto de forma segura antes de evaluar la fecha
         primer_elemento = str(partes[0])
         es_una_fecha = False
         
-        # Validación de formato de fecha seguro de 8 caracteres (DD/MM/YY)
         if len(primer_elemento) == 8 and ("/" in primer_elemento or "-" in primer_elemento):
             es_una_fecha = True
         
@@ -213,7 +213,7 @@ if archivos_cargados:
                     monto_imputacion = importe
                     monto_banco = -importe
                 
-                # REESTRUCTURACIÓN LINEAL: Cierre limpio de diccionarios para erradicar SyntaxError de llaves abiertas
+                # Generación lineal de pases contables balanceados para ONVIO
                 pase_1 = {
                     "Número de asiento": int(asiento_actual),
                     "Número de Pase": int(pase_actual),
