@@ -132,7 +132,7 @@ def procesar_lineas_comafi(text):
         partes = linea.split()
         if len(partes) == 0:
             continue
-        if partes[0].upper() == "TRANSPORTE":
+        if str(partes[0]).upper() == "TRANSPORTE":
             continue
         if any(keyword in linea_upper for keyword in ["GARANTIA DE HASTA", "LEY 24.485", "DECRETO 540/95", "CIRCULAR OPASI"]):
             continue 
@@ -141,11 +141,11 @@ def procesar_lineas_comafi(text):
         if freno_activado:
             continue 
             
-        primer_item = partes[0]
+        primer_item = str(partes[0])
         tiene_fecha = re.match(r'^\d{2}/\d{2}/\d{2}$', primer_item)
         
         if tiene_fecha:
-            fecha_en_memoria = str(primer_item)
+            fecha_en_memoria = primer_item
             if "Saldo Anterior" in linea:
                 continue
             concepto_acumulado = " ".join([x for x in partes[1:] if not re.match(r'^\d{6,12}$', x) and "," not in x])
@@ -200,35 +200,35 @@ def procesar_lineas_galicia(text):
             continue
             
         partes = linea.split()
-        if len(partes) < 4:
+        if len(partes) < 3:
             continue
             
         # Comprobar si arranca con fecha válida (DD/MM/YY)
-        if not re.match(r'^\d{2}/\d{2}/\d{2}$', partes[0]):
+        if not re.match(r'^\d{2}/\d{2}/\d{2}$', str(partes[0])):
             continue
             
-        fecha = partes[0]
+        fecha = str(partes[0])
         
         # Buscar importes contables en el renglón de Galicia
         valores = []
         for p in partes[1:]:
             p_clean = p.replace(".", "").replace(",", ".")
-            # Detectar números negativos del Galicia (ej: -4.500,00)
             if p_clean.startswith("-"):
                 try:
-                    valores.append((float(p_clean), p))
+                    valores.append(float(p_clean))
                 except: pass
             else:
                 try:
-                    # Validar si tiene formato decimal contable argentino
                     if "," in p:
-                        valores.append((float(p_clean), p))
+                        valores.append(float(p_clean))
                 except: pass
                 
         if len(valores) < 2:
-            continue # Necesitamos el movimiento y el saldo para operar
+            continue 
             
-        importe_banco = valores[0][0]
-        str_importe = valores[0][1]
-        str_saldo = valores[-1][1]
+        importe_banco = valores[-2]
+        str_importe = partes[-2]
+        str_saldo = partes[-1]
         
+        # Aislar descripción removiendo la fecha, el importe y el saldo final de la línea
+        tokens_desc = [x for x in partes[1:] if x != str_importe and x != str_saldo and not re.match(r'^\d{6,12}$', x)]
