@@ -1,0 +1,30 @@
+{
+  "Asociación Civil 12 Casas": {
+    "codigo_onvio": "",
+    "cuit": "",
+    "plan_de_cuentas": "",
+    "bancos": {
+      "Banco Comafi": {
+        "lector": "comafi",
+        "cuenta_contable": "11016010",
+        "concepto": "BCO COMAFI CTA CTE $ 1070-01085-6",
+        "leyenda_banco": "COMAFI CTA CTE",
+        "reglas": "reglas/12casas_comafi.csv"
+      }
+    }
+  },
+  "Alambrados Cambren S.R.L.": {
+    "codigo_onvio": "0209",
+    "cuit": "30710839189",
+    "plan_de_cuentas": "planes/0209_alambrados_cambren.csv",
+    "bancos": {
+      "Banco Galicia": {
+        "lector": "galicia",
+        "cuenta_contable": "11016040",
+        "concepto": "BCO GALICIA CTA CTE $ 5868-9217-8",
+        "leyenda_banco": "GALICIA CTA CTE",
+        "reglas": "reglas/0209_galicia.csv"
+      }
+    }
+  }
+}
