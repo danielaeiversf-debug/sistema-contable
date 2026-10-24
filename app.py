@@ -3,12 +3,13 @@ import pandas as pd
 import pdfplumber
 import io
 import re
+import json
 import unicodedata
+from pathlib import Path
 
-# Configuración visual de Streamlit (Ligada al sector y más corporativa)
+# Configuración visual de Streamlit (Diseño corporativo del Sector Sociedades)
 st.set_page_config(page_title="ONVIO Automatizador - Sector Sociedades", layout="wide")
 
-# Cambiar diseño visual y tipografía mediante estilos CSS inyectados
 st.markdown("""
     <style>
     .main { background-color: #f8f9fa; }
@@ -37,80 +38,14 @@ if not st.session_state["autenticado"]:
 # --- A PARTIR DE AQUÍ EL SISTEMA SE DESBLOQUEA ---
 
 st.title("🤖 Sistema de Automatización Contable")
-st.subheader("Asociaciones Civiles - Motor de Importación Directa para 'ONVIO'")
+st.subheader("Sector Sociedades - Motor de Importación Directa para 'ONVIO'")
 
-# CUENTAS CONTABLES FIJAS
-CUENTA_BANCO_COMAFI = "11016010"  # CTA/CTE $ COMAFI 1070-01085-6
-NRO_CUENTA_EXTRACTO = "1070-01085-6"  # número de cuenta que figura en el extracto (para la columna Concepto)
+# 2. CONFIGURACIÓN POR EMPRESA Y BANCO (carpeta "datos" del repositorio)
+#    datos/empresas.json  -> empresas, sus bancos, cuenta contable del banco y texto del Concepto
+#    datos/planes/*.csv   -> plan de cuentas de cada empresa (codigo;descripcion)
+#    datos/reglas/*.csv   -> reglas de imputación por empresa + banco (texto;tipo;cuenta;nombre)
+CARPETA_DATOS = Path(__file__).parent / "datos"
 CUENTA_PUENTE_DEF = "13000000"
-
-# Las claves se comparan SIN acentos, puntos ni guiones ("Débitos" = "DEBITOS", "Caj.Aut." = "CAJ AUT").
-# Se recorre en orden y gana la PRIMERA clave que aparece en la descripción.
-
-# a) Solo para movimientos que el banco informa en la columna CRÉDITOS (ingresos)
-EQUIVALENCIAS_CREDITO = {
-    "DEPOSITO": ("11011000", "CAJA"),
-    "CAJ AUT": ("11011000", "CAJA"),
-    "RECIB": ("11031010", "DEUDORES POR SERVICIOS"),
-    "CVU": ("11031010", "DEUDORES POR SERVICIOS"),
-    "TERCEROS": ("11031010", "DEUDORES POR SERVICIOS"),
-    "TRANSF": ("11031010", "DEUDORES POR SERVICIOS"),
-    "DATAN": ("11031010", "DEUDORES POR SERVICIOS"),
-    "OURENSE": ("11031010", "DEUDORES POR SERVICIOS"),
-}
-
-# b) Para todos los movimientos (débitos, y créditos que no entraron en la lista anterior)
-EQUIVALENCIAS_BASE = {
-    "IMPUESTO A LOS CRED": ("53080000", "IMPUESTO CRED LEY 25413"),
-    "CREDITOS TASA": ("53080000", "IMPUESTO CRED LEY 25413"),
-    "CRED LEY 25413": ("53080000", "IMPUESTO CRED LEY 25413"),
-    "IMPUESTO A LOS DEB": ("53070000", "IMPUESTO DEB LEY 25413"),
-    "DEBITOS TASA": ("53070000", "IMPUESTO DEB LEY 25413"),
-    "DEBITOS ART 45": ("53070000", "IMPUESTO DEB LEY 25413"),
-    "DEB LEY 25413": ("53070000", "IMPUESTO DEB LEY 25413"),
-    "IVA ALICUOTA": ("11032050", "DGI IVA RET. Y PERCEPCIONES"),
-    "SELLO": ("53010000", "GASTOS BANCARIOS"),
-    "BANELCO": ("53010000", "GASTOS BANCARIOS"),
-    "MANTENIMIENTO": ("53010000", "GASTOS BANCARIOS"),
-    "COMISION": ("53010000", "GASTOS BANCARIOS"),
-    "INTERES": ("51010000", "INTERESES BANCARIOS"),
-    "DESCUBIERTO": ("51010000", "INTERESES BANCARIOS"),
-    "HABERES": ("21012010", "PROVEEDORES"),
-    "SUELDOS": ("21013010", "SUELDOS Y JORNALES A PAGAR"),
-    "HONORARIOS": ("52020000", "HONORARIOS PROFESIONALES"),
-    "DEPOSITO": ("11011000", "CAJA"),
-    "CAJ AUT": ("11011000", "CAJA"),
-    "RECIB": ("11031010", "DEUDORES POR SERVICIOS"),
-    "DATAN": ("11031010", "DEUDORES POR SERVICIOS"),
-    "OURENSE": ("11031010", "DEUDORES POR SERVICIOS"),
-    "PAGO ELECTRONICO": ("21012010", "PROVEEDORES"),
-    "PAGO DE SERVICIOS": ("21012010", "PROVEEDORES"),
-    "PAGO DE CHEQUE": ("21012010", "PROVEEDORES"),
-    "EBANKIN": ("21012010", "PROVEEDORES"),
-    "TERCEROS": ("21012010", "PROVEEDORES"),
-    "TRANSF": ("21012010", "PROVEEDORES"),
-    "PROV": ("21012010", "PROVEEDORES"),
-}
-
-# Barra lateral parametrizada y con selectores avanzados para la empresa
-st.sidebar.header("⚙️ Configuración del Trabajo")
-banco_seleccionado = st.sidebar.selectbox("Seleccionar Banco", ["Banco Comafi", "Banco Santander (Próximamente)", "MercadoPago (Próximamente)"])
-plan_seleccionado = st.sidebar.selectbox("Plan de Cuentas Empresa", ["Asociación Civil 12 Casas", "S.R.L. Genérico", "S.A. Genérico"])
-nro_asiento_inicial = st.sidebar.number_input("Número de Asiento Inicial", min_value=1, value=1, step=1)
-cuenta_puente = st.sidebar.text_input("Cuenta Puente", value=CUENTA_PUENTE_DEF)
-
-if st.sidebar.button("🔒 Cerrar Sesión"):
-    st.session_state["autenticado"] = False
-    st.rerun()
-
-st.markdown("### 1. Cargar Extractos Bancarios")
-archivos_cargados = st.file_uploader("Arrastrá uno o más PDFs del extracto bancario a la vez", type=["pdf"], accept_multiple_files=True)
-
-MARCA_SALTO_HOJA = "<<<SALTO_DE_HOJA>>>"
-
-# Solo se usan si no se pudo ubicar la columna Débitos/Créditos del importe
-CLAVES_CREDITO = ["RECIB", "DEPOSITO", "ACREDITADO", "CAJ AUT", "CVU", "TONELLI", "CPS", "OURENSE", "DATAN"]
-CLAVES_DEBITO_FORZADO = ["IMPUESTO A LOS CRED", "CREDITOS TASA", "CRED LEY 25413"]
 
 def normalizar(texto):
     """Mayúsculas, sin acentos y sin signos: 'Depósito Caj.Aut. Propio' -> 'DEPOSITO CAJ AUT PROPIO'"""
@@ -118,15 +53,99 @@ def normalizar(texto):
     t = "".join(c for c in t if not unicodedata.combining(c)).upper()
     return " ".join(re.sub(r"[^A-Z0-9]+", " ", t).split())
 
-def asignar_cuenta(descripcion, es_credito, cuenta_puente):
-    desc = " " + normalizar(descripcion) + " "
-    tablas = [EQUIVALENCIAS_CREDITO, EQUIVALENCIAS_BASE] if es_credito else [EQUIVALENCIAS_BASE]
-    for tabla in tablas:
-        for clave, datos in tabla.items():
-            if normalizar(clave) in desc:
-                return str(datos[0]), str(datos[1])
-    return str(cuenta_puente), "CUENTA PUENTE"
+@st.cache_data
+def cargar_empresas():
+    with open(CARPETA_DATOS / "empresas.json", encoding="utf-8") as f:
+        return json.load(f)
 
+@st.cache_data
+def cargar_plan(ruta):
+    """Devuelve {codigo: descripcion} y el conjunto de cuentas imputables (las que no son títulos)."""
+    if not ruta:
+        return {}, set()
+    df = pd.read_csv(CARPETA_DATOS / ruta, sep=";", dtype=str, encoding="utf-8-sig").dropna()
+    plan = dict(zip(df["codigo"].str.strip(), df["descripcion"].str.strip()))
+    titulos = set()
+    for cod in plan:
+        prefijo = cod.rstrip("0")
+        if any(otro != cod and otro.startswith(prefijo) for otro in plan):
+            titulos.add(cod)
+    return plan, set(plan) - titulos
+
+@st.cache_data
+def cargar_reglas(ruta):
+    df = pd.read_csv(CARPETA_DATOS / ruta, sep=";", dtype=str, encoding="utf-8-sig").fillna("")
+    return [{"texto": normalizar(r["texto"]), "tipo": r["tipo"].strip().upper(),
+             "cuenta": r["cuenta"].strip(), "nombre": r["nombre"].strip()} for _, r in df.iterrows()]
+
+def validar_reglas(reglas, plan, imputables):
+    """Avisa si una regla apunta a un código que no está en el plan o que es un título."""
+    if not plan:
+        return []
+    errores = []
+    for r in reglas:
+        if r["cuenta"] == "PUENTE":
+            continue
+        if r["cuenta"] not in plan:
+            errores.append(f"'{r['texto']}' → {r['cuenta']}: el código no existe en el plan de cuentas")
+        elif r["cuenta"] not in imputables:
+            errores.append(f"'{r['texto']}' → {r['cuenta']} ({plan[r['cuenta']]}): es una cuenta título, no imputable")
+    return errores
+
+def asignar_cuenta(descripcion, es_credito, reglas, plan, cuenta_puente):
+    """Recorre las reglas en orden; gana la primera cuyo texto aparece (al inicio de una palabra)
+    en la descripción y cuyo tipo coincide (DEBITO / CREDITO / AMBOS)."""
+    desc = " " + normalizar(descripcion) + " "
+    tipo_mov = "CREDITO" if es_credito else "DEBITO"
+    for r in reglas:
+        if r["tipo"] not in ("AMBOS", tipo_mov):
+            continue
+        if " " + r["texto"] in desc:
+            if r["cuenta"] == "PUENTE":
+                return str(cuenta_puente), "CUENTA PUENTE (TRANSF. CUENTA PROPIA)", True
+            nombre = plan.get(r["cuenta"]) or r["nombre"] or r["cuenta"]
+            return r["cuenta"], nombre, True
+    return str(cuenta_puente), "CUENTA PUENTE", False
+
+EMPRESAS = cargar_empresas()
+
+# Barra lateral: empresa y banco
+st.sidebar.header("⚙️ Selección de Entorno de Trabajo")
+empresa_seleccionada = st.sidebar.selectbox("Seleccionar Empresa Cliente", list(EMPRESAS.keys()))
+empresa = EMPRESAS[empresa_seleccionada]
+banco_activo = st.sidebar.selectbox("Seleccionar Banco", list(empresa["bancos"].keys()))
+banco = empresa["bancos"][banco_activo]
+nro_asiento_inicial = st.sidebar.number_input("Número de Asiento Inicial", min_value=1, value=1, step=1)
+cuenta_puente = st.sidebar.text_input("Cuenta Puente", value=CUENTA_PUENTE_DEF)
+
+cuenta_banco_activa = banco["cuenta_contable"]
+plan_activo, imputables = cargar_plan(empresa.get("plan_de_cuentas", ""))
+reglas_activas = cargar_reglas(banco["reglas"])
+
+nombre_cuenta_banco = plan_activo.get(cuenta_banco_activa, "")
+st.sidebar.info(f"🏦 Banco: {banco_activo}\n💳 Cuenta contable: {cuenta_banco_activa} {nombre_cuenta_banco}\n"
+                f"📒 Plan de cuentas: {f'{len(plan_activo)} cuentas' if plan_activo else 'sin cargar (nombres desde las reglas)'}")
+
+if st.sidebar.button("🔒 Cerrar Sesión"):
+    st.session_state["autenticado"] = False
+    st.rerun()
+
+errores_reglas = validar_reglas(reglas_activas, plan_activo, imputables)
+if plan_activo and cuenta_banco_activa not in plan_activo:
+    errores_reglas.insert(0, f"La cuenta del banco {cuenta_banco_activa} no existe en el plan de cuentas")
+if errores_reglas:
+    st.error("⚠️ Hay reglas de imputación que no coinciden con el plan de cuentas:\n\n- " + "\n- ".join(errores_reglas))
+
+st.markdown(f"### 1. Cargar Extractos de: **{empresa_seleccionada}** ({banco_activo})")
+archivos_cargados = st.file_uploader("Arrastrá uno o más PDFs del extracto bancario a la vez", type=["pdf"], accept_multiple_files=True)
+
+MARCA_SALTO_HOJA = "<<<SALTO_DE_HOJA>>>"
+
+# Solo se usan si no se pudo ubicar la columna Débitos/Créditos del importe (Comafi)
+CLAVES_CREDITO = ["RECIB", "DEPOSITO", "ACREDITADO", "CAJ AUT", "CVU", "TONELLI", "CPS", "OURENSE", "DATAN"]
+CLAVES_DEBITO_FORZADO = ["IMPUESTO A LOS CRED", "CREDITOS TASA", "CRED LEY 25413"]
+
+# --- MOTOR DE LECTURA COMAFI ---
 def es_importe(token):
     """True si el token tiene formato de importe: 1.234,56 / 1,25 / 1.234,56-"""
     return re.match(r'^-?\d{1,3}(\.\d{3})*,\d{2}-?$', token) is not None
@@ -278,21 +297,94 @@ def procesar_lineas_comafi(filas):
         
     return movimientos
 
+# --- MOTOR DE LECTURA GALICIA ---
+def procesar_galicia(pdf, cuit_propio=""):
+    """Lee el extracto de Cuenta Corriente del Galicia.
+    - Cada movimiento empieza con fecha y termina con importe y saldo (débitos con signo negativo).
+    - Las líneas siguientes sin fecha completan la descripción (ej.: ACREDITAMIENTO / PRISMA-COMERCIOS / VISA EST.).
+    - Si el detalle trae el CUIT de la propia empresa, se marca como CUENTA PROPIA.
+    Devuelve (movimientos, totales_del_extracto)."""
+    movimientos = []
+    actual = None
+    totales = None
+    fin_movimientos = False
+    patron_mov = re.compile(r'^(\d{2}/\d{2}/\d{2})\s+(.*?)\s+(-?[\d.]+,\d{2})\s+(-?[\d.]+,\d{2})$')
+    patron_total = re.compile(r'^Total\s+\$\s*([\d.]+,\d{2})\s+-?\$\s*([\d.]+,\d{2})')
+
+    def a_float(s):
+        return float(s.replace(".", "").replace(",", "."))
+
+    def cerrar(mov):
+        if mov is None:
+            return
+        extra = " ".join(mov["extra"])
+        tokens = [x for x in (mov["desc"] + " " + extra).split() if not re.match(r'^\d{6,}$', x)]
+        desc = " ".join(tokens)
+        # Transferencia cuyo ordenante/destinatario es la propia empresa (mismo CUIT) = transferencia entre cuentas propias
+        if (cuit_propio and "TRANSF" in mov["desc"].upper()
+                and cuit_propio in (mov["desc"] + " " + extra).replace("-", "")):
+            desc += " CUENTA PROPIA"
+        movimientos.append({"Fecha": mov["fecha"], "Descripción": desc,
+                            "Importe": abs(mov["importe"]), "EsCredito": mov["importe"] > 0})
+
+    for page in pdf.pages:
+        for linea in (page.extract_text() or "").split("\n"):
+            l = linea.strip()
+            if not l or fin_movimientos:
+                continue
+            m_total = patron_total.match(l)
+            if m_total:
+                totales = (a_float(m_total.group(1)), a_float(m_total.group(2)))
+                cerrar(actual); actual = None
+                fin_movimientos = True
+                continue
+            u = l.upper()
+            if "CONSOLIDADO DE RETENC" in u:
+                cerrar(actual); actual = None
+                fin_movimientos = True
+                continue
+            # Encabezados y pies de página
+            if u.startswith("RESUMEN DE CUENTA") or u.startswith("FECHA DESCRIPCI") or re.match(r'^\d{14,}[A-Z]?$', l):
+                continue
+            m = patron_mov.match(l)
+            if m:
+                cerrar(actual)
+                actual = {"fecha": m.group(1), "desc": m.group(2), "importe": a_float(m.group(3)), "extra": []}
+            elif actual is not None:
+                actual["extra"].append(l)
+    cerrar(actual)
+    return movimientos, totales
+
+# --- PROCESAMIENTO PRINCIPAL ---
 if archivos_cargados:
     movimientos_totales = []
+    controles = []
     
     for archivo in archivos_cargados:
-        # Se procesa el PDF completo de una vez (no hoja por hoja) para no perder
-        # movimientos cuya fecha queda al pie de una hoja y el importe en la siguiente
-        try:
-            with pdfplumber.open(archivo) as pdf:
+        with pdfplumber.open(archivo) as pdf:
+            if banco["lector"] == "galicia":
+                movs, totales = procesar_galicia(pdf, empresa.get("cuit", ""))
+                movimientos_totales.extend(movs)
+                if totales:
+                    cred = round(sum(m["Importe"] for m in movs if m["EsCredito"]), 2)
+                    deb = round(sum(m["Importe"] for m in movs if not m["EsCredito"]), 2)
+                    controles.append((archivo.name, cred, deb, totales[0], totales[1]))
+            else:
+                # Se procesa el PDF completo de una vez (no hoja por hoja) para no perder
+                # movimientos cuya fecha queda al pie de una hoja y el importe en la siguiente
                 movimientos_totales.extend(procesar_lineas_comafi(lineas_pdf(pdf)))
-        except Exception as e:
-            st.error(f"❌ No se pudo procesar el archivo {archivo.name}: {e}")
                 
     if movimientos_totales:
         df_origen = pd.DataFrame(movimientos_totales)
-        st.success(f"🔥 ¡Éxito! Se procesaron {len(archivos_cargados)} archivos sueltos y se extrajeron {len(df_origen)} transacciones reales.")
+        st.success(f"🔥 ¡Éxito! Se procesaron {len(archivos_cargados)} archivos y se extrajeron {len(df_origen)} transacciones reales.")
+        
+        # Control de totales contra el pie del extracto (Galicia)
+        for nombre, cred, deb, tot_cred, tot_deb in controles:
+            if abs(cred - tot_cred) < 0.01 and abs(deb - tot_deb) < 0.01:
+                st.info(f"✅ {nombre}: créditos $ {cred:,.2f} y débitos $ {deb:,.2f} coinciden con los totales del extracto.")
+            else:
+                st.error(f"❌ {nombre}: créditos $ {cred:,.2f} (extracto $ {tot_cred:,.2f}) · débitos $ {deb:,.2f} "
+                         f"(extracto $ {tot_deb:,.2f}). Revisar movimientos.")
         
         filas_planilla = []
         sin_cuenta = []
@@ -303,20 +395,17 @@ if archivos_cargados:
             df_dia = df_origen[df_origen["Fecha"] == str(fecha)]
             pase_actual = 1
             
-            # Concepto: BCO COMAFI CTA CTE $ 1070-01085-6 MES MM/AAAA (según la fecha del asiento)
-            try:
-                _d, _m, _a = str(fecha).split("/")
-                concepto_asiento = f"BCO COMAFI CTA CTE $ {NRO_CUENTA_EXTRACTO} MES {_m}/{'20' + _a if len(_a) == 2 else _a}"
-            except ValueError:
-                concepto_asiento = f"BCO COMAFI CTA CTE $ {NRO_CUENTA_EXTRACTO}"
+            # Concepto: BCO ... CTA CTE $ N° MES MM/AAAA (según la fecha del asiento)
+            _d, _m, _a = str(fecha).split("/")
+            concepto_asiento = f"{banco['concepto']} MES {_m}/{'20' + _a if len(_a) == 2 else _a}"
             
             for idx, fila in df_dia.iterrows():
                 desc = fila["Descripción"]
                 importe = fila["Importe"]
                 es_credito = fila["EsCredito"]
                 
-                codigo_cuenta, nombre_cuenta = asignar_cuenta(desc, es_credito, cuenta_puente)
-                if nombre_cuenta == "CUENTA PUENTE":
+                codigo_cuenta, nombre_cuenta, con_regla = asignar_cuenta(desc, es_credito, reglas_activas, plan_activo, cuenta_puente)
+                if not con_regla:
                     sin_cuenta.append({"Descripción": desc, "Tipo": "Crédito" if es_credito else "Débito", "Importe": importe})
                 
                 if es_credito:
@@ -329,7 +418,7 @@ if archivos_cargados:
                 filas_planilla.append([int(asiento_actual), int(pase_actual), str(fecha), concepto_asiento, str(codigo_cuenta), float(monto_imputacion), 0.0, f"{nombre_cuenta} - {desc}", "", "", "", ""])
                 pase_actual += 1
                 
-                filas_planilla.append([int(asiento_actual), int(pase_actual), str(fecha), concepto_asiento, str(CUENTA_BANCO_COMAFI), float(monto_banco), 0.0, f"COMAFI CTA CTE - {desc}", "", "", "", ""])
+                filas_planilla.append([int(asiento_actual), int(pase_actual), str(fecha), concepto_asiento, str(cuenta_banco_activa), float(monto_banco), 0.0, f"{banco['leyenda_banco']} - {desc}", "", "", "", ""])
                 pase_actual += 1
                 
             asiento_actual += 1
@@ -350,7 +439,7 @@ if archivos_cargados:
                           .agg(Movimientos=("Importe", "size"), Total=("Importe", "sum"))
                           .sort_values("Movimientos", ascending=False))
                 st.warning(f"⚠️ {len(sin_cuenta)} movimientos quedaron en Cuenta Puente ({cuenta_puente}). "
-                           "Agregá su texto en las equivalencias para imputarlos.")
+                           "Agregá su texto en las reglas de imputación para imputarlos.")
                 with st.expander("Ver descripciones que fueron a Cuenta Puente"):
                     st.dataframe(df_sin, use_container_width=True, hide_index=True)
             st.dataframe(df_resultado)
@@ -369,7 +458,7 @@ if archivos_cargados:
             st.download_button(
                 label="📥 Descargar Excel para importar en ONVIO",
                 data=excel_data,
-                file_name=f"Importacion_ONVIO_{pd.Timestamp.today():%Y%m%d}.xlsx",
+                file_name=f"Importacion_ONVIO_{empresa_seleccionada.replace(' ', '_')}_{banco_activo.replace(' ', '_')}_{pd.Timestamp.today():%Y%m%d}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
             )
