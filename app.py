@@ -44,8 +44,23 @@ st.subheader("Sector Sociedades - Motor de Importación Directa para 'ONVIO'")
 #    datos/empresas.json  -> empresas, sus bancos, cuenta contable del banco y texto del Concepto
 #    datos/planes/*.csv   -> plan de cuentas de cada empresa (codigo;descripcion)
 #    datos/reglas/*.csv   -> reglas de imputación por empresa + banco (texto;tipo;cuenta;nombre)
-CARPETA_DATOS = Path(__file__).parent / "datos"
+CARPETA_APP = Path(__file__).parent
+CARPETA_DATOS = CARPETA_APP / "datos"
 CUENTA_PUENTE_DEF = "13000000"
+
+def ubicar_archivo(ruta_relativa):
+    """Busca el archivo en datos/<ruta>; si no está ahí, lo busca por nombre en todo el repositorio
+    (por si la carpeta se subió con otro nombre o los archivos quedaron sueltos)."""
+    ruta = CARPETA_DATOS / ruta_relativa
+    if ruta.exists():
+        return ruta
+    nombre = Path(ruta_relativa).name
+    for candidato in sorted(CARPETA_APP.rglob(nombre)):
+        if ".git" not in candidato.parts:
+            return candidato
+    st.error(f"❌ No se encontró el archivo **{nombre}** en el repositorio. "
+             f"Subí la carpeta `datos` completa (con `empresas.json`, `planes/` y `reglas/`) al lado de `app.py`.")
+    st.stop()
 
 def normalizar(texto):
     """Mayúsculas, sin acentos y sin signos: 'Depósito Caj.Aut. Propio' -> 'DEPOSITO CAJ AUT PROPIO'"""
@@ -55,7 +70,7 @@ def normalizar(texto):
 
 @st.cache_data
 def cargar_empresas():
-    with open(CARPETA_DATOS / "empresas.json", encoding="utf-8") as f:
+    with open(ubicar_archivo("empresas.json"), encoding="utf-8") as f:
         return json.load(f)
 
 @st.cache_data
@@ -63,7 +78,7 @@ def cargar_plan(ruta):
     """Devuelve {codigo: descripcion} y el conjunto de cuentas imputables (las que no son títulos)."""
     if not ruta:
         return {}, set()
-    df = pd.read_csv(CARPETA_DATOS / ruta, sep=";", dtype=str, encoding="utf-8-sig").dropna()
+    df = pd.read_csv(ubicar_archivo(ruta), sep=";", dtype=str, encoding="utf-8-sig").dropna()
     plan = dict(zip(df["codigo"].str.strip(), df["descripcion"].str.strip()))
     titulos = set()
     for cod in plan:
@@ -74,7 +89,7 @@ def cargar_plan(ruta):
 
 @st.cache_data
 def cargar_reglas(ruta):
-    df = pd.read_csv(CARPETA_DATOS / ruta, sep=";", dtype=str, encoding="utf-8-sig").fillna("")
+    df = pd.read_csv(ubicar_archivo(ruta), sep=";", dtype=str, encoding="utf-8-sig").fillna("")
     return [{"texto": normalizar(r["texto"]), "tipo": r["tipo"].strip().upper(),
              "cuenta": r["cuenta"].strip(), "nombre": r["nombre"].strip()} for _, r in df.iterrows()]
 
